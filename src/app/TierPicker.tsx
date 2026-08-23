@@ -1,13 +1,19 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
+  ensureReady,
   getBackend,
-  isModelNotWiredUpError,
+  isModelLoadError,
   listBackends,
   type CapabilityReport,
   type InferenceTier,
-  type LoadProgress,
 } from '../inference';
 import { Alert, Badge, Button, ProgressBar, Spinner, cn } from '../ui';
+import { formatBytes, hasRoomFor, readQuota, requestPersistence, type QuotaReport } from './storageQuota';
+import { useModelStatus } from './useModelStatus';
+
+function formatSize(megabytes: number): string {
+  return megabytes >= 1000 ? `${(megabytes / 1000).toFixed(1)} GB` : `${megabytes} MB`;
+}
 
 export interface TierPickerProps {
   selected: InferenceTier;
@@ -18,7 +24,7 @@ export interface TierPickerProps {
 
 export function TierPicker({ selected, onSelect, report, className }: TierPickerProps) {
   return (
-    <div className={cn('grid gap-3', className)}>
+    <div className={cn('grid gap-3', className)} role="radiogroup" aria-label="Inference tier">
       {listBackends().map((backend) => {
         const availability = report?.[backend.tier];
         const available = availability?.available ?? true;
@@ -51,13 +57,20 @@ export function TierPicker({ selected, onSelect, report, className }: TierPicker
               ) : (
                 <Badge tone="danger">unavailable</Badge>
               )}
-              {backend.approximateDownloadMb !== null && (
-                <Badge tone="neutral">~{backend.approximateDownloadMb} MB download</Badge>
+              {backend.model.approximateDownloadMb !== null && (
+                <Badge tone="neutral">
+                  {formatSize(backend.model.approximateDownloadMb)} download
+                </Badge>
+              )}
+              {backend.model.approximateVramMb !== null && (
+                <Badge tone="neutral">
+                  needs ~{formatSize(backend.model.approximateVramMb)} GPU memory
+                </Badge>
               )}
             </div>
             <p className="text-ink-400 mt-2 text-sm leading-relaxed">{backend.description}</p>
             <p className="text-ink-600 mt-1.5 font-mono text-xs">
-              {backend.modelId}
+              {backend.model.id}
               {availability ? ` · ${availability.reason}` : ''}
             </p>
           </button>
@@ -73,51 +86,110 @@ export interface ModelPreparationProps {
 }
 
 /**
- * Placeholder for the real download flow. It calls the selected backend's
- * `load`, which is exactly the call that will report genuine progress once the
- * models are wired up; today the two real tiers report that they are stubs.
+ * Downloads and loads a tier's model.
+ *
+ * The load goes through `ensureReady`, so progress shows up here and in the
+ * app-wide banner at once and navigating away does not orphan the download.
+ * That also means `tier` must be the *active* tier — both callers select a tier
+ * by saving it, so it always is.
  */
 export function ModelPreparation({ tier, className }: ModelPreparationProps) {
-  const [progress, setProgress] = useState<LoadProgress | null>(null);
-  const [running, setRunning] = useState(false);
-  const [message, setMessage] = useState<{ tone: 'success' | 'warn' | 'danger'; text: string } | null>(
-    null,
-  );
-
   const backend = getBackend(tier);
+  const status = useModelStatus();
+  const [quota, setQuota] = useState<QuotaReport | null>(null);
+  const [cached, setCached] = useState<boolean | null>(null);
+  const [failure, setFailure] = useState<Error | null>(null);
 
-  async function prepare() {
-    setRunning(true);
-    setMessage(null);
-    setProgress({ fraction: 0, label: 'Starting' });
+  const downloadMb = backend.model.approximateDownloadMb;
+  const isActiveTier = status.tier === tier;
+  const running = isActiveTier && status.status === 'loading';
+  const ready = isActiveTier && status.status === 'ready';
+
+  useEffect(() => {
+    let cancelled = false;
+    setCached(null);
+    setFailure(null);
+
+    if (downloadMb === null) return;
+
+    void readQuota().then((result) => {
+      if (!cancelled) setQuota(result);
+    });
+    // Only probed for the tier on screen: the probe imports that engine's SDK,
+    // and there is no reason to pull down both.
+    void backend.isCached().then((result) => {
+      if (!cancelled) setCached(result);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [backend, downloadMb]);
+
+  async function prepare(modelId?: string) {
+    setFailure(null);
+    // A cache that the browser may evict is a wasted multi-gigabyte download.
+    if (downloadMb !== null && !quota?.persisted) await requestPersistence();
 
     try {
-      await backend.load((update) => setProgress(update));
-      setMessage({ tone: 'success', text: `${backend.label} is ready.` });
+      await ensureReady({ modelId });
+      setCached(true);
     } catch (error) {
-      setMessage({
-        tone: isModelNotWiredUpError(error) ? 'warn' : 'danger',
-        text: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      setRunning(false);
+      setFailure(error instanceof Error ? error : new Error(String(error)));
     }
   }
+
+  const room = hasRoomFor(downloadMb, quota ?? { availableBytes: null, persisted: false });
+  const error = failure ?? (isActiveTier && status.status === 'error' ? status.error : null);
+  const fallbackModelId = isModelLoadError(error) ? error.fallbackModelId : null;
 
   return (
     <div className={cn('flex flex-col gap-3', className)}>
       <div className="flex flex-wrap items-center gap-3">
-        <Button onClick={prepare} disabled={running} variant="secondary" size="sm">
+        <Button onClick={() => prepare()} disabled={running || ready} variant="secondary" size="sm">
           {running ? <Spinner className="size-3" /> : null}
-          {running ? 'Preparing…' : 'Prepare model'}
+          {running ? 'Preparing…' : ready ? 'Model ready' : 'Prepare model'}
         </Button>
-        <span className="text-ink-500 text-xs">
-          Downloads happen in your browser and are cached for next time.
-        </span>
+
+        {cached === true && !ready && <Badge tone="success">already downloaded</Badge>}
+        {cached === false && downloadMb !== null && (
+          <span className="text-ink-500 text-xs">
+            First use downloads {formatSize(downloadMb)} from Hugging Face, then it is cached.
+          </span>
+        )}
+        {downloadMb === null && (
+          <span className="text-ink-500 text-xs">Nothing to download for this tier.</span>
+        )}
       </div>
 
-      {progress && <ProgressBar fraction={progress.fraction} label={progress.label} />}
-      {message && <Alert tone={message.tone}>{message.text}</Alert>}
+      {room === false && quota?.availableBytes != null && downloadMb !== null && (
+        <Alert tone="warn" title="This browser may not have room">
+          {formatSize(downloadMb)} is needed but only {formatBytes(quota.availableBytes)} is free for
+          this site. Free up disk space, or pick a tier with a smaller model.
+        </Alert>
+      )}
+
+      {running && (
+        <ProgressBar
+          fraction={status.progress?.fraction ?? null}
+          label={status.progress?.label ?? 'Preparing'}
+        />
+      )}
+
+      {ready && !failure && <Alert tone="success">{backend.label} is ready to use.</Alert>}
+
+      {error && (
+        <Alert tone="danger" title="The model could not be loaded">
+          {error.message}
+          {fallbackModelId && (
+            <span className="mt-2 block">
+              <Button variant="secondary" size="sm" onClick={() => prepare(fallbackModelId)}>
+                Try {fallbackModelId}
+              </Button>
+            </span>
+          )}
+        </Alert>
+      )}
     </div>
   );
 }

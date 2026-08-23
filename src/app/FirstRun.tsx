@@ -13,7 +13,7 @@ const FACTS: readonly { title: string; body: string }[] = [
   },
   {
     title: 'The model runs in your browser',
-    body: 'Weights are downloaded straight from a public model host on first use and cached by the browser afterwards.',
+    body: 'Weights come straight from Hugging Face on first use — up to a few gigabytes — and are cached, so you pay that wait once.',
   },
   {
     title: 'Your data lives on this device',
@@ -30,6 +30,15 @@ export function FirstRun() {
   // Default the selection to the best tier this device can actually run, but
   // only once detection has finished, so nothing flickers.
   const selected: InferenceTier = tier ?? (report ? preferredTier(report) : 'mock');
+
+  /**
+   * Saved on selection rather than on "Start learning", so that the tier the
+   * download button prepares is genuinely the active one.
+   */
+  function selectTier(next: InferenceTier) {
+    setTier(next);
+    void update({ activeTier: next });
+  }
 
   async function start() {
     setSaving(true);
@@ -73,10 +82,11 @@ export function FirstRun() {
         <div>
           <h2 className="text-ink-100 font-medium">Choose how inference runs</h2>
           <p className="text-ink-500 mt-1 mb-4 text-sm leading-relaxed">
-            You can change this later in Settings. Real model loading is not wired up yet — pick the
-            mock tier to walk through every mode with canned German responses.
+            You can change this later in Settings. Downloading the model now is optional — it also
+            happens on your first generation. The mock tier needs no download at all and is there to
+            walk through every mode with canned German.
           </p>
-          <TierPicker selected={selected} onSelect={setTier} report={report} />
+          <TierPicker selected={selected} onSelect={selectTier} report={report} />
           <ModelPreparation tier={selected} className="mt-4" />
         </div>
 

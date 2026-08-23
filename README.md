@@ -33,32 +33,92 @@ configuration or rewrite rules.
 Other scripts:
 
 ```bash
-npm test          # unit tests for the SM-2 scheduler, mastery rules and diffing
+npm test          # SM-2 scheduler, mastery rules, diffing, prompt/schema mapping
 npm run typecheck # tsc --noEmit
 ```
 
 ## How inference works
 
-Text generation runs on your machine through one of two in-browser engines,
-chosen on first run and changeable in Settings:
+Text generation runs on your machine through one of three engines, chosen on
+first run and changeable in Settings:
 
-| Tier | Engine | Notes |
-| --- | --- | --- |
-| WebGPU | [WebLLM](https://github.com/mlc-ai/web-llm) (MLC) | Fastest. Only offered when `navigator.gpu` actually grants an adapter. |
-| WASM | [wllama](https://github.com/ngxson/wllama) (llama.cpp in WebAssembly) | Universal fallback. Works in any modern browser, slower, smaller model. |
-| Mock (dev) | canned fixtures | No download. Deterministic German responses so every mode can be walked end to end. |
+| Tier | Engine | Model | Download | Needs |
+| --- | --- | --- | --- | --- |
+| WebGPU | [WebLLM](https://github.com/mlc-ai/web-llm) (MLC) | Llama 3.1 8B Instruct, q4f32 | ~5 GB | WebGPU and ~6 GB of GPU memory |
+| WASM | [wllama](https://github.com/ngxson/wllama) (llama.cpp in WebAssembly) | Qwen2.5 1.5B Instruct, Q4\_K\_M | 940 MB | any modern browser |
+| Mock (dev) | canned fixtures | — | none | nothing |
 
-Model weights are **not** part of this repository. When a real tier is used, the
-model is fetched client-side from a public model host on first use and cached by
-the browser afterwards, so later sessions start without downloading again.
+The WebGPU tier is only offered when `navigator.gpu` actually grants an adapter,
+and it is the noticeably better German of the two — worth the download if the
+device can hold it. The WASM tier runs on the CPU anywhere, and is the fallback
+whenever WebGPU is unavailable or the 8B model does not fit. The mock tier
+returns fixed German through the same prompt and parsing path, which makes it
+the way to work on the app offline or without waiting on a download.
 
-**Current status:** the two real tiers are stubs. They implement the full
-interface, report their capability and their target model, and throw a clearly
-marked `ModelNotWiredUpError` when asked to load or generate. Wiring the actual
-engines up is a follow-up task and touches only
-`src/inference/backends/webllm.ts` and `src/inference/backends/wllama.ts` — no
-caller changes. Until then, use the **Mock (dev)** tier, which exercises the same
-prompt and parsing path with fixed German content.
+### Downloads and caching
+
+Model weights are **not** in this repository and are never proxied through a
+server of ours. Each tier fetches its weights straight from Hugging Face on
+first use and caches them in the browser, so the wait happens once per browser
+profile. Progress shows in a banner that follows you across screens, and
+switching tier leaves the other tier's cache intact.
+
+Before a first download the app checks `navigator.storage.estimate()` and warns
+if there is not enough free space, and asks for `navigator.storage.persist()` so
+that several gigabytes of weights are not silently evicted later.
+
+If the 8B model fails to load for lack of GPU memory, the failure is reported
+with a one-click offer to load Llama 3.2 3B (~1.8 GB) instead, rather than
+leaving you at a dead end.
+
+### Structured output
+
+Five of the seven prompts need JSON back. Rather than hoping a small model
+complies, each is defined once as a JSON Schema in
+`src/inference/responseSchemas.ts` and passed to whichever engine is active:
+WebLLM compiles it with XGrammar, wllama hands it to llama.cpp. `generateText`
+looks the schema up from the prompt's `### TASK:` line, so no mode pipeline
+knows constrained generation exists. The tolerant parser in
+`src/inference/parse.ts` stays in place as a backstop for the free-text prompts
+and for any engine that ignores the constraint.
+
+### Hosting and cross-origin isolation
+
+wllama's multi-threaded build needs `SharedArrayBuffer`, which browsers only
+grant to a cross-origin isolated page. That requires two response headers:
+
+```
+Cross-Origin-Opener-Policy: same-origin
+Cross-Origin-Embedder-Policy: credentialless
+```
+
+They are configured for the dev and preview servers in `vite.config.ts`, for
+Vercel in `vercel.json`, and for Netlify and Cloudflare Pages in
+`public/_headers`. `credentialless` is used rather than `require-corp` because
+Hugging Face does not send CORP headers and `require-corp` would break the model
+download itself.
+
+**GitHub Pages cannot set response headers.** The app still works there, but the
+WASM tier silently falls back to a single thread and is markedly slower. Use the
+WebGPU tier, or host somewhere that can set headers, if that matters.
+
+### Checking a real tier on your machine
+
+Neither real tier can be covered by the test suite: one needs a GPU, both need
+gigabytes of weights. The tests cover the request mapping, the schemas and the
+mode pipelines against the mock tier, and the rest is a short manual pass:
+
+1. Pick the tier in Settings and press **Prepare model**. Progress should be
+   determinate and should keep updating while you navigate to another screen.
+2. Run one pass through each of the three modes. Reading and Vocabulary exercise
+   the constrained JSON calls; Journal exercises both a free-text call and a
+   constrained one.
+3. Reload the page and prepare again. It should be near-instant and the tier
+   should show **already downloaded**.
+4. On a device with less than ~6 GB of GPU memory, choosing WebGPU should fail
+   with an offer to load the 3B model instead, not a raw error.
+5. Confirm `crossOriginIsolated` is `true` in the console on your host of
+   choice — if it is `false`, the WASM tier is running single-threaded.
 
 ## Architecture
 
@@ -86,8 +146,9 @@ extraction, answer evaluation, correction, sentence grading — goes through:
 generateText(prompt: string, options?: InferenceOptions): Promise<string>
 ```
 
-Prompts are plain text in, plain text out. The model is never trusted to emit a
-particular structure: `src/inference/parse.ts` recovers JSON tolerantly, and the
+Prompts are plain text in, plain text out; the schema that constrains a reply is
+looked up inside `generateText`, not passed in by the caller. Even so the model
+is never *trusted*: `src/inference/parse.ts` recovers JSON tolerantly, and the
 journal diff is computed locally from the two plain texts rather than asked for.
 
 ### Exposure is not mastery

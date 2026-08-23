@@ -1,0 +1,9 @@
+# Netlify (and Cloudflare Pages) header rules.
+#
+# Cross-origin isolation is what lets the WASM tier use SharedArrayBuffer and
+# therefore multiple threads. `credentialless` rather than `require-corp` so the
+# model download from Hugging Face still works — that host does not send CORP
+# headers, and a fast tier that cannot fetch its weights is worse than a slow one.
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: credentialless

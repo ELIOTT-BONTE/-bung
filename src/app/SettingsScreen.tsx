@@ -75,8 +75,9 @@ export function SettingsScreen() {
           <h3 className="text-ink-100 font-medium">Inference tier</h3>
           <p className="text-ink-500 mt-1 text-sm leading-relaxed">
             Which engine answers every generation request. WebGPU is offered only when this device
-            actually grants an adapter; the WASM tier works everywhere. Real model loading is a
-            follow-up — both real tiers currently report that they are stubs.
+            actually grants an adapter; the WASM tier works everywhere. Switching tier does not
+            delete the other one&apos;s cached weights, so you can move back without downloading
+            again.
           </p>
         </div>
 

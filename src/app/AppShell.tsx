@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { getBackend } from '../inference';
 import { Badge, cn } from '../ui';
 import { BrandMark } from './BrandMark';
+import { ModelStatusBanner } from './ModelStatusBanner';
 import { hrefFor, type Route } from './router';
 import { useSettings } from './settings';
 
@@ -68,6 +69,8 @@ export function AppShell({ route, children }: { route: Route; children: ReactNod
             </span>
           </a>
         </div>
+
+        <ModelStatusBanner />
       </header>
 
       <main className="mx-auto w-full max-w-5xl flex-1 px-5 py-8 sm:py-12">{children}</main>

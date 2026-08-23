@@ -15,12 +15,7 @@ import {
   type MockWord,
 } from '../mockData';
 import { PROMPT_INTENT, readPromptIntent, readSection } from '../prompts';
-import type {
-  BackendStatus,
-  InferenceBackend,
-  InferenceOptions,
-  LoadProgressListener,
-} from '../types';
+import type { BackendStatus, InferenceBackend, InferenceOptions, LoadOptions } from '../types';
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -288,8 +283,12 @@ class MockBackend implements InferenceBackend {
   readonly label = 'Mock (dev)';
   readonly description =
     'Canned offline German responses. No download, no model — for trying out every mode end to end.';
-  readonly modelId = 'canned-fixtures';
-  readonly approximateDownloadMb = null;
+  readonly model = {
+    id: 'canned-fixtures',
+    approximateDownloadMb: null,
+    approximateVramMb: null,
+  };
+  readonly fallbackModel = null;
 
   private status: BackendStatus = 'unloaded';
 
@@ -297,11 +296,20 @@ class MockBackend implements InferenceBackend {
     return this.status;
   }
 
-  async load(onProgress?: LoadProgressListener): Promise<void> {
+  getLoadedModelId(): string | null {
+    return this.status === 'ready' ? this.model.id : null;
+  }
+
+  /** Nothing to download, so the fixtures are always "cached". */
+  async isCached(): Promise<boolean> {
+    return true;
+  }
+
+  async load(options?: LoadOptions): Promise<void> {
     this.status = 'loading';
-    onProgress?.({ fraction: 0.5, label: 'Preparing canned responses' });
+    options?.onProgress?.({ fraction: 0.5, label: 'Preparing canned responses' });
     await delay(120);
-    onProgress?.({ fraction: 1, label: 'Ready' });
+    options?.onProgress?.({ fraction: 1, label: 'Ready' });
     this.status = 'ready';
   }
 

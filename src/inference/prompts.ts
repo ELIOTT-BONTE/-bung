@@ -38,7 +38,7 @@ const NOUN_FIELDS_RULE = [
   '- For every noun you MUST include "determiner" ("der", "die" or "das") and',
   '  "pluralForm" (the full plural, e.g. "Bahnhöfe"). Never omit or guess-blank them.',
   '- "term" for a noun is the bare singular, capitalised, without its article.',
-  '- For anything that is not a noun set "determiner" and "pluralForm" to null.',
+  '- For anything that is not a noun set "determiner" and "pluralForm" to "".',
   '- "definition" is a short English translation or gloss.',
 ].join('\n');
 
@@ -185,6 +185,7 @@ export function buildJournalVocabPrompt(input: JournalVocabPromptInput): string 
     'and that are worth tracking as vocabulary. Skip function words and names.',
     'For each item set "usedCorrectly" to true if the learner\'s own form was already',
     'correct, and false if the correction had to change how they used that word.',
+    'Set "note" to one short English remark, or "" when there is nothing to add.',
     '',
     NOUN_FIELDS_RULE,
     '',

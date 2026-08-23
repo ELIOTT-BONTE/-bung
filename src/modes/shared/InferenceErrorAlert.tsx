@@ -1,23 +1,21 @@
-import { isModelNotWiredUpError } from '../../inference';
+import { isModelLoadError } from '../../inference';
 import { hrefFor } from '../../app/router';
 import { Alert } from '../../ui';
 
 /**
- * One error surface for every mode. It singles out the "backend is still a
- * stub" case, which is the expected failure right now, from real breakage.
+ * One error surface for every mode. A model that would not load is the failure
+ * users actually hit, and it always has a way out — a smaller model, another
+ * tier — so it gets its own treatment rather than a generic red box.
  */
 export function InferenceErrorAlert({ error }: { error: unknown }) {
   if (!error) return null;
 
-  if (isModelNotWiredUpError(error)) {
+  if (isModelLoadError(error)) {
     return (
-      <Alert tone="warn" title="This tier has no model behind it yet">
+      <Alert tone="warn" title="The model could not be loaded">
         {error.message}{' '}
-        <a
-          href={hrefFor('/settings')}
-          className="underline decoration-dotted underline-offset-4"
-        >
-          Open settings
+        <a href={hrefFor('/settings')} className="underline decoration-dotted underline-offset-4">
+          {error.fallbackModelId ? 'Try the smaller model in settings' : 'Change tier in settings'}
         </a>
         .
       </Alert>
