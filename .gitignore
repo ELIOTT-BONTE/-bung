@@ -1,0 +1,18 @@
+node_modules
+dist
+dist-ssr
+coverage
+*.local
+
+# Model weights and caches must never be committed.
+models/
+*.gguf
+*.wasm.cache
+.cache/
+
+.DS_Store
+.idea
+.vscode/*
+!.vscode/extensions.json
+*.log
+npm-debug.log*

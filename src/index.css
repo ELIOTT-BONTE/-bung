@@ -1,0 +1,73 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans:
+    'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-reading:
+    'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif;
+
+  --color-ink-950: oklch(0.155 0.011 265);
+  --color-ink-900: oklch(0.19 0.013 265);
+  --color-ink-850: oklch(0.222 0.014 265);
+  --color-ink-800: oklch(0.262 0.015 265);
+  --color-ink-700: oklch(0.335 0.016 265);
+  --color-ink-600: oklch(0.44 0.016 265);
+  --color-ink-500: oklch(0.55 0.015 265);
+  --color-ink-400: oklch(0.655 0.014 265);
+  --color-ink-300: oklch(0.755 0.011 265);
+  --color-ink-200: oklch(0.855 0.008 265);
+  --color-ink-100: oklch(0.935 0.005 265);
+
+  --color-ember-200: oklch(0.9 0.06 70);
+  --color-ember-300: oklch(0.845 0.095 68);
+  --color-ember-400: oklch(0.785 0.13 62);
+  --color-ember-500: oklch(0.715 0.155 55);
+  --color-ember-600: oklch(0.615 0.145 50);
+
+  --color-sage-300: oklch(0.85 0.08 160);
+  --color-sage-400: oklch(0.765 0.11 160);
+  --color-sage-500: oklch(0.665 0.125 158);
+
+  --color-clay-300: oklch(0.79 0.1 25);
+  --color-clay-400: oklch(0.7 0.14 24);
+  --color-clay-500: oklch(0.615 0.17 24);
+
+  --radius-card: 0.875rem;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-ink-950 text-ink-200 font-sans antialiased;
+    background-image:
+      radial-gradient(60rem 40rem at 15% -10%, oklch(0.26 0.03 265 / 0.55), transparent 65%),
+      radial-gradient(50rem 35rem at 95% 0%, oklch(0.28 0.05 55 / 0.16), transparent 60%);
+    background-attachment: fixed;
+    min-height: 100vh;
+  }
+
+  ::selection {
+    @apply bg-ember-500/30 text-ink-100;
+  }
+
+  :focus-visible {
+    @apply outline-ember-400/70 outline-2 outline-offset-2;
+  }
+
+  /* Thin, unobtrusive scrollbars that match the dark surface. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-ink-700) transparent;
+  }
+}
+
+@utility surface {
+  @apply bg-ink-900/70 border-ink-800/80 rounded-card border backdrop-blur-sm;
+}
+
+@utility text-balance-title {
+  text-wrap: balance;
+}
