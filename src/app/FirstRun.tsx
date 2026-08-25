@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { detectCapabilities, preferredTier, type InferenceTier } from '../inference';
+import { detectCapabilities, preferredTier, type LocalInferenceTier } from '../inference';
 import { Button, Card } from '../ui';
 import { useSettings } from './settings';
 import { ModelPreparation, TierPicker } from './TierPicker';
@@ -9,33 +9,33 @@ import { BrandMark } from './BrandMark';
 const FACTS: readonly { title: string; body: string }[] = [
   {
     title: 'No server, no account',
-    body: 'The whole app is a static bundle. Nothing you write is sent anywhere — there is nowhere for it to go.',
+    body: 'The whole app is a static bundle. Out of the box nothing you write leaves this device, because there is nowhere for it to go.',
   },
   {
     title: 'The model runs in your browser',
-    body: 'Weights come straight from Hugging Face on first use — up to a few gigabytes — and are cached, so you pay that wait once.',
+    body: 'Weights come straight from Hugging Face and are cached, so you pay that wait once — and only if you need it.',
   },
   {
-    title: 'Your data lives on this device',
-    body: 'Vocabulary, review history and journal entries are stored in IndexedDB, per browser. Clearing site data clears them.',
+    title: 'Or borrow a free hosted one',
+    body: 'Settings can hold free API keys for Mistral, Gemini or Groq. Give it one and generation is instant, with no download at all.',
   },
 ];
 
 export function FirstRun() {
   const { settings, update } = useSettings();
   const { data: report } = useAsync(detectCapabilities, []);
-  const [tier, setTier] = useState<InferenceTier | null>(null);
+  const [tier, setTier] = useState<LocalInferenceTier | null>(null);
   const [saving, setSaving] = useState(false);
 
   // Default the selection to the best tier this device can actually run, but
   // only once detection has finished, so nothing flickers.
-  const selected: InferenceTier = tier ?? (report ? preferredTier(report) : 'mock');
+  const selected: LocalInferenceTier = tier ?? (report ? preferredTier(report) : 'mock');
 
   /**
    * Saved on selection rather than on "Start learning", so that the tier the
    * download button prepares is genuinely the active one.
    */
-  function selectTier(next: InferenceTier) {
+  function selectTier(next: LocalInferenceTier) {
     setTier(next);
     void update({ activeTier: next });
   }
@@ -80,11 +80,12 @@ export function FirstRun() {
         </div>
 
         <div>
-          <h2 className="text-ink-100 font-medium">Choose how inference runs</h2>
+          <h2 className="text-ink-100 font-medium">Choose the engine on this device</h2>
           <p className="text-ink-500 mt-1 mb-4 text-sm leading-relaxed">
-            You can change this later in Settings. Downloading the model now is optional — it also
-            happens on your first generation. The mock tier needs no download at all and is there to
-            walk through every mode with canned German.
+            This is what answers when no hosted provider is configured, so it is worth setting even
+            if you plan to add an API key later. Downloading now is optional — it happens on first
+            use otherwise, and never at all while a hosted provider is answering. The mock tier needs
+            no download and walks through every mode with canned German.
           </p>
           <TierPicker selected={selected} onSelect={selectTier} report={report} />
           <ModelPreparation tier={selected} className="mt-4" />

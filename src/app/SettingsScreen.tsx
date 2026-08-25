@@ -9,6 +9,7 @@ import {
   STARTER_VOCAB,
 } from '../storage';
 import { Alert, Badge, Button, Card, SectionHeading, TextInput } from '../ui';
+import { ApiKeyFields, ChainOrder } from './ProviderChain';
 import { useSettings } from './settings';
 import { ModelPreparation, TierPicker } from './TierPicker';
 import { useAsync } from './useAsync';
@@ -67,17 +68,32 @@ export function SettingsScreen() {
       <SectionHeading
         eyebrow="Settings"
         title="Inference, data and storage"
-        description="Everything here is local to this browser profile."
+        description="Your vocabulary and writing stay in this browser profile. Generation can be handed to a hosted model if you give it a key."
       />
 
       <Card className="flex flex-col gap-5">
         <div>
-          <h3 className="text-ink-100 font-medium">Inference tier</h3>
+          <h3 className="text-ink-100 font-medium">Hosted providers</h3>
           <p className="text-ink-500 mt-1 text-sm leading-relaxed">
-            Which engine answers every generation request. WebGPU is offered only when this device
-            actually grants an adapter; the WASM tier works everywhere. Switching tier does not
-            delete the other one&apos;s cached weights, so you can move back without downloading
-            again.
+            Each generation is offered to these free tiers in order, and the first one that answers
+            wins. A provider with no key is skipped, so this is entirely optional — leave all three
+            blank and everything runs locally, exactly as before. Keys are stored in this browser
+            only, but the prompts themselves do leave your machine, so avoid writing anything
+            private in your journal while a provider is configured.
+          </p>
+        </div>
+
+        <ApiKeyFields />
+      </Card>
+
+      <Card className="flex flex-col gap-5">
+        <div>
+          <h3 className="text-ink-100 font-medium">Local engine</h3>
+          <p className="text-ink-500 mt-1 text-sm leading-relaxed">
+            The last candidate in the chain, used when no hosted provider can answer. WebGPU is
+            offered only when this device actually grants an adapter; the WASM tier works everywhere.
+            Switching does not delete the other one&apos;s cached weights, so you can move back
+            without downloading again.
           </p>
         </div>
 
@@ -87,6 +103,13 @@ export function SettingsScreen() {
           report={report}
         />
         <ModelPreparation tier={activeTier} />
+
+        <div className="border-ink-800/70 border-t pt-4">
+          <p className="text-ink-400 mb-2 text-xs font-medium tracking-wide uppercase">
+            Order requests are tried in
+          </p>
+          <ChainOrder localTier={activeTier} />
+        </div>
       </Card>
 
       <Card className="flex flex-col gap-5">

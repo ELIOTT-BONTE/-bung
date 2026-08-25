@@ -2,63 +2,96 @@
  * The one door into inference.
  *
  * Callers only ever use `generateText`. Which backend answers is decided here
- * by the active tier, so adding, removing or swapping a backend never touches
- * a mode screen.
+ * by walking a chain — the free hosted providers in order, then the local
+ * engine the user picked — so adding, removing or swapping a backend never
+ * touches a mode screen.
  *
- * Loading is also centralised. A model download can take minutes, and the
- * screen that triggered it is often not the screen the user is looking at when
- * it finishes, so every load goes through `ensureReady` and publishes progress
- * to a module-level emitter that any component can subscribe to.
+ * Loading is also centralised, and only ever applies to the local engine. A
+ * model download can take minutes, and the screen that triggered it is often
+ * not the screen the user is looking at when it finishes, so every load goes
+ * through `ensureReady` and publishes progress to a module-level emitter that
+ * any component can subscribe to. Crucially, `generateText` only reaches for
+ * that loader when every hosted provider has declined, so a working API key
+ * means no download at all.
  */
 
+import { geminiBackend } from './backends/gemini';
+import { groqBackend } from './backends/groq';
+import { mistralBackend } from './backends/mistral';
 import { mockBackend } from './backends/mock';
 import { webllmBackend } from './backends/webllm';
 import { wllamaBackend } from './backends/wllama';
+import { runChain, type ChainDeps } from './chain';
+import { hasApiKey } from './keys';
 import { GERMAN_TUTOR_SYSTEM_PROMPT } from './prompts';
 import { schemaForPrompt } from './responseSchemas';
 import {
-  INFERENCE_TIERS,
+  HOSTED_TIERS,
+  LOCAL_TIERS,
   type BackendStatus,
+  type HostedInferenceBackend,
+  type HostedProviderId,
   type InferenceBackend,
   type InferenceOptions,
   type InferenceTier,
   type LoadProgress,
   type LoadProgressListener,
+  type LocalInferenceBackend,
+  type LocalInferenceTier,
 } from './types';
 
-const BACKENDS: Record<InferenceTier, InferenceBackend> = {
+/**
+ * Split by kind rather than typed as one flat record, so `listLocalBackends`
+ * and `listHostedBackends` return tiers narrow enough to use without a cast.
+ */
+const BACKENDS: Record<HostedProviderId, HostedInferenceBackend> &
+  Record<LocalInferenceTier, LocalInferenceBackend> = {
+  mistral: mistralBackend,
+  gemini: geminiBackend,
+  groq: groqBackend,
   webgpu: webllmBackend,
   wasm: wllamaBackend,
   mock: mockBackend,
 };
 
 /**
- * Defaults to the mock tier so a fresh page load can never blow up before the
- * app shell has read the user's saved choice out of storage.
+ * Which engine answers when no hosted provider can — never a hosted provider
+ * itself. Defaults to the mock tier so a fresh page load can never blow up
+ * before the app shell has read the user's saved choice out of storage.
  */
-let activeTier: InferenceTier = 'mock';
+let activeLocalTier: LocalInferenceTier = 'mock';
 
-const tierListeners = new Set<(tier: InferenceTier) => void>();
+const tierListeners = new Set<(tier: LocalInferenceTier) => void>();
 
 export function getBackend(tier: InferenceTier): InferenceBackend {
   return BACKENDS[tier];
 }
 
 export function listBackends(): InferenceBackend[] {
-  return INFERENCE_TIERS.map((tier) => BACKENDS[tier]);
+  return [...HOSTED_TIERS, ...LOCAL_TIERS].map((tier) => BACKENDS[tier]);
 }
 
-export function getActiveTier(): InferenceTier {
-  return activeTier;
+/** The engines that can be chosen as the last resort, for the tier picker. */
+export function listLocalBackends(): LocalInferenceBackend[] {
+  return LOCAL_TIERS.map((tier) => BACKENDS[tier]);
+}
+
+/** The providers the chain tries first, in the order it tries them. */
+export function listHostedBackends(): HostedInferenceBackend[] {
+  return HOSTED_TIERS.map((tier) => BACKENDS[tier]);
+}
+
+export function getActiveTier(): LocalInferenceTier {
+  return activeLocalTier;
 }
 
 export function getActiveBackend(): InferenceBackend {
-  return BACKENDS[activeTier];
+  return BACKENDS[activeLocalTier];
 }
 
-export function setActiveTier(tier: InferenceTier): void {
-  if (activeTier === tier) return;
-  activeTier = tier;
+export function setActiveTier(tier: LocalInferenceTier): void {
+  if (activeLocalTier === tier) return;
+  activeLocalTier = tier;
   inFlightLoad = null;
   publishLoadState({
     tier,
@@ -69,7 +102,7 @@ export function setActiveTier(tier: InferenceTier): void {
   for (const listener of tierListeners) listener(tier);
 }
 
-export function subscribeToActiveTier(listener: (tier: InferenceTier) => void): () => void {
+export function subscribeToActiveTier(listener: (tier: LocalInferenceTier) => void): () => void {
   tierListeners.add(listener);
   return () => tierListeners.delete(listener);
 }
@@ -82,7 +115,12 @@ export interface LoadState {
   error: Error | null;
 }
 
-let loadState: LoadState = { tier: activeTier, status: 'unloaded', progress: null, error: null };
+let loadState: LoadState = {
+  tier: activeLocalTier,
+  status: 'unloaded',
+  progress: null,
+  error: null,
+};
 
 const loadListeners = new Set<(state: LoadState) => void>();
 
@@ -115,11 +153,11 @@ export interface EnsureReadyOptions {
 }
 
 /**
- * Resolves once the active tier can answer a `generate` call. Safe to call on
+ * Resolves once the local tier can answer a `generate` call. Safe to call on
  * every generation: it is a no-op once the model is loaded.
  */
 export function ensureReady(options?: EnsureReadyOptions): Promise<void> {
-  const tier = activeTier;
+  const tier = activeLocalTier;
   const backend = BACKENDS[tier];
 
   if (backend.getStatus() === 'ready' && !options?.modelId) return Promise.resolve();
@@ -144,7 +182,7 @@ export function ensureReady(options?: EnsureReadyOptions): Promise<void> {
         onProgress: (progress) => {
           options?.onProgress?.(progress);
           // A tier switch mid-download must not resurrect the old tier's bar.
-          if (activeTier !== tier) return;
+          if (activeLocalTier !== tier) return;
           publishLoadState({ tier, status: 'loading', progress, error: null });
         },
       });
@@ -163,31 +201,42 @@ export function ensureReady(options?: EnsureReadyOptions): Promise<void> {
   return promise;
 }
 
-/** Frees the active tier's model and its memory. */
+/** Frees the active local tier's model and its memory. */
 export async function unloadActiveBackend(): Promise<void> {
   inFlightLoad = null;
   await getActiveBackend().unload();
-  publishLoadState({ tier: activeTier, status: 'unloaded', progress: null, error: null });
+  publishLoadState({ tier: activeLocalTier, status: 'unloaded', progress: null, error: null });
 }
 
-export async function generateText(prompt: string, options?: InferenceOptions): Promise<string> {
-  await ensureReady();
+const chainDeps: ChainDeps = {
+  getBackend,
+  hasApiKey,
+  ensureLocalReady: () => ensureReady(),
+};
 
+export async function generateText(prompt: string, options?: InferenceOptions): Promise<string> {
   // Prompts declare their intent on the first line, so the schema that
   // constrains the reply can be looked up here rather than passed down through
   // every mode pipeline.
   const schema = options?.schema ?? schemaForPrompt(prompt);
 
-  return getActiveBackend().generate(prompt, {
-    systemPrompt: GERMAN_TUTOR_SYSTEM_PROMPT,
-    temperature: 0.7,
-    maxTokens: 640,
-    ...options,
-    schema,
-  });
+  return runChain(
+    prompt,
+    {
+      systemPrompt: GERMAN_TUTOR_SYSTEM_PROMPT,
+      temperature: 0.7,
+      maxTokens: 640,
+      ...options,
+      schema,
+    },
+    activeLocalTier,
+    chainDeps,
+  );
 }
 
 export * from './capabilities';
+export * from './chain';
+export * from './keys';
 export * from './prompts';
 export * from './responseSchemas';
 export * from './schemas';

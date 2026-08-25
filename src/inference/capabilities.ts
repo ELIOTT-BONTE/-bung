@@ -1,4 +1,5 @@
-import type { InferenceTier } from './types';
+import { hasApiKey } from './keys';
+import { HOSTED_TIERS, type InferenceTier, type LocalInferenceTier } from './types';
 
 export interface TierAvailability {
   tier: InferenceTier;
@@ -54,9 +55,25 @@ export function detectWasm(): TierAvailability {
   };
 }
 
+/**
+ * A hosted provider needs no hardware, only a key. There is no way to tell
+ * whether the key is *valid* without spending a request, so "available" here
+ * means "worth attempting" — the chain finds out the rest.
+ */
+export function detectHosted(): Record<string, TierAvailability> {
+  const report: Record<string, TierAvailability> = {};
+  for (const provider of HOSTED_TIERS) {
+    report[provider] = hasApiKey(provider)
+      ? { tier: provider, available: true, reason: 'API key configured' }
+      : { tier: provider, available: false, reason: 'No API key — this provider will be skipped' };
+  }
+  return report;
+}
+
 export async function detectCapabilities(): Promise<CapabilityReport> {
   const webgpu = await detectWebGpu();
   return {
+    ...detectHosted(),
     webgpu,
     wasm: detectWasm(),
     mock: {
@@ -64,11 +81,15 @@ export async function detectCapabilities(): Promise<CapabilityReport> {
       available: true,
       reason: 'Canned offline responses — no download, for trying out the app',
     },
-  };
+  } as CapabilityReport;
 }
 
-/** Best tier the current device can actually run, most capable first. */
-export function preferredTier(report: CapabilityReport): InferenceTier {
+/**
+ * Best *local* engine the current device can run, most capable first. Hosted
+ * providers are never returned: this picks the last link in the chain, not the
+ * first.
+ */
+export function preferredTier(report: CapabilityReport): LocalInferenceTier {
   if (report.webgpu.available) return 'webgpu';
   if (report.wasm.available) return 'wasm';
   return 'mock';

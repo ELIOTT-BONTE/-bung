@@ -6,9 +6,31 @@
  * caller. This module holds no React and no storage imports.
  */
 
-export type InferenceTier = 'webgpu' | 'wasm' | 'mock';
+/** An engine that runs the model on this device. */
+export type LocalInferenceTier = 'webgpu' | 'wasm' | 'mock';
 
-export const INFERENCE_TIERS: readonly InferenceTier[] = ['webgpu', 'wasm', 'mock'];
+/** A free-tier API that answers over the network. */
+export type HostedProviderId = 'mistral' | 'gemini' | 'groq';
+
+export type InferenceTier = HostedProviderId | LocalInferenceTier;
+
+export const LOCAL_TIERS: readonly LocalInferenceTier[] = ['webgpu', 'wasm', 'mock'];
+
+/**
+ * Declaration order is the order the chain tries them, so this list is the
+ * single place the provider precedence is written down.
+ */
+export const HOSTED_TIERS: readonly HostedProviderId[] = ['mistral', 'gemini', 'groq'];
+
+export const INFERENCE_TIERS: readonly InferenceTier[] = [...HOSTED_TIERS, ...LOCAL_TIERS];
+
+export function isHostedTier(tier: InferenceTier): tier is HostedProviderId {
+  return (HOSTED_TIERS as readonly string[]).includes(tier);
+}
+
+export function isLocalTier(tier: InferenceTier): tier is LocalInferenceTier {
+  return (LOCAL_TIERS as readonly string[]).includes(tier);
+}
 
 /**
  * The slice of JSON Schema we use to constrain model output. Deliberately
@@ -81,6 +103,8 @@ export interface InferenceBackend {
   readonly tier: InferenceTier;
   readonly label: string;
   readonly description: string;
+  /** True when generating sends the prompt over the network to an API. */
+  readonly hosted: boolean;
   /** The model this tier loads unless asked for another. */
   readonly model: ModelDescriptor;
   /** Smaller model to offer when the default will not fit. Null if none. */
@@ -93,6 +117,21 @@ export interface InferenceBackend {
   load(options?: LoadOptions): Promise<void>;
   generate(prompt: string, options?: InferenceOptions): Promise<string>;
   unload(): Promise<void>;
+}
+
+/**
+ * `hosted` doubles as the discriminant of these two, so a list of one kind
+ * carries a tier the caller can use without a cast — the tier picker only ever
+ * hands back a local engine, and the key fields only ever a provider.
+ */
+export interface LocalInferenceBackend extends InferenceBackend {
+  readonly tier: LocalInferenceTier;
+  readonly hosted: false;
+}
+
+export interface HostedInferenceBackend extends InferenceBackend {
+  readonly tier: HostedProviderId;
+  readonly hosted: true;
 }
 
 export type ModelLoadFailure =
@@ -135,6 +174,43 @@ export class ModelLoadError extends Error {
 
 export function isModelLoadError(error: unknown): error is ModelLoadError {
   return error instanceof ModelLoadError;
+}
+
+/**
+ * A hosted provider refused or could not answer.
+ *
+ * The chain moves to the next candidate on any of these. `retryable` is the
+ * narrower question of whether *this* provider might work later — true for a
+ * rate limit or an outage, false for a rejected key or a rejected request,
+ * which need a human to fix. That distinction is what lets the UI say "you are
+ * over the free limit" rather than "something went wrong".
+ *
+ * A missing key is not represented here at all: a provider with no key is
+ * skipped before any request is made.
+ */
+export class HostedProviderError extends Error {
+  readonly provider: HostedProviderId;
+  /** HTTP status, or null for a network, CORS or timeout failure. */
+  readonly status: number | null;
+  readonly retryable: boolean;
+
+  constructor(init: {
+    provider: HostedProviderId;
+    status: number | null;
+    retryable: boolean;
+    message: string;
+    cause?: unknown;
+  }) {
+    super(init.message, { cause: init.cause });
+    this.name = 'HostedProviderError';
+    this.provider = init.provider;
+    this.status = init.status;
+    this.retryable = init.retryable;
+  }
+}
+
+export function isHostedProviderError(error: unknown): error is HostedProviderError {
+  return error instanceof HostedProviderError;
 }
 
 /** True for an abort the user (or a unmounting screen) asked for. */

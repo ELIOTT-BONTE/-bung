@@ -52,7 +52,7 @@ export function AppShell({ route, children }: { route: Route; children: ReactNod
           <a
             href={hrefFor('/settings')}
             className="flex items-center gap-2"
-            title={`Inference tier: ${backend.label}`}
+            title={`Local engine: ${backend.label} — hosted providers are tried first`}
           >
             <Badge tone={activeTier === 'mock' ? 'accent' : 'success'} className="hidden sm:inline-flex">
               {backend.label}

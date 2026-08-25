@@ -5,9 +5,14 @@ passages and answer questions about them, keep a journal that gets corrected
 with a word-level diff, and drill the vocabulary you pick up along the way with
 a spaced-repetition scheduler.
 
-There is no backend. No account, no API keys, no telemetry, no network calls at
-runtime except downloading the language model itself. Everything you write and
-every word you learn is stored in your own browser.
+There is no backend and no account. Out of the box there are no API keys and no
+network calls at runtime except downloading the language model itself, and
+everything you write is stored in your own browser.
+
+If you would rather not download several gigabytes of weights, you can paste a
+free API key for Mistral, Gemini or Groq into Settings and generation is handed
+to them instead — at the cost of your prompts leaving the device. That is opt-in
+and off until you add a key. See [Inference](#how-inference-works).
 
 ## Running it locally
 
@@ -19,6 +24,11 @@ npm run dev
 That's the whole setup. Open the URL Vite prints (usually
 `http://localhost:5173`) and the app walks you through a short first-run screen.
 
+Optionally, `cp .env.example .env` and add a free API key or two to skip the
+model download while developing. Keys can also be pasted into Settings at
+runtime, which is the better option for a build anyone else will load — see
+[API keys](#api-keys-and-what-they-cost-you).
+
 To produce a static build:
 
 ```bash
@@ -28,19 +38,43 @@ npm run preview   # serves dist/ locally
 
 `dist/` is a plain folder of static files with relative asset paths, so it can be
 dropped onto GitHub Pages, Vercel, Netlify, S3 or any web server without
-configuration or rewrite rules.
+configuration or rewrite rules. Note that a build made with keys in `.env` has
+those keys inlined in its JavaScript.
 
 Other scripts:
 
 ```bash
-npm test          # SM-2 scheduler, mastery rules, diffing, prompt/schema mapping
+npm test          # SM-2 scheduler, mastery rules, diffing, prompt/schema mapping,
+                  # hosted request shapes and the fallback chain
 npm run typecheck # tsc --noEmit
 ```
 
 ## How inference works
 
-Text generation runs on your machine through one of three engines, chosen on
-first run and changeable in Settings:
+Every generation walks a chain of candidates and takes the first answer. Free
+hosted tiers come first, because they are fast, good at German and cost nothing;
+the engine on your own machine sits at the end, because it is the only candidate
+that cannot run out of quota.
+
+| # | Candidate | Model | Needs |
+| --- | --- | --- | --- |
+| 1 | [Mistral](https://console.mistral.ai/api-keys) free mode | `mistral-small-latest` | an API key |
+| 2 | [Gemini](https://aistudio.google.com/apikey) free tier | `gemini-3.6-flash` | a restricted API key |
+| 3 | [Groq](https://console.groq.com/keys) free tier | `openai/gpt-oss-120b` | an API key |
+| 4 | the local engine you chose | see below | a download, or nothing for mock |
+
+A provider with no key is skipped without a request, so **the chain is a no-op
+until you add one** and the app behaves exactly as it did before: local engine
+only. A provider that answers means no weights are ever downloaded.
+
+A candidate is abandoned and the next one tried when it has no key, rejects the
+key, rate-limits you, cannot be reached, or returns something the parsers cannot
+use. Only your own cancellation stops the walk. If every candidate declines, the
+error names each one and why, rather than reporting a single opaque failure.
+
+### The local engine
+
+The last link is one of three, chosen on first run and changeable in Settings:
 
 | Tier | Engine | Model | Download | Needs |
 | --- | --- | --- | --- | --- |
@@ -54,6 +88,37 @@ device can hold it. The WASM tier runs on the CPU anywhere, and is the fallback
 whenever WebGPU is unavailable or the 8B model does not fit. The mock tier
 returns fixed German through the same prompt and parsing path, which makes it
 the way to work on the app offline or without waiting on a download.
+
+### API keys, and what they cost you
+
+Keys can come from two places. Anything you paste into Settings is stored in
+IndexedDB in your browser and goes nowhere else. Alternatively, copy
+`.env.example` to `.env` and fill it in; a key typed in Settings overrides the
+matching `.env` value.
+
+Three things are worth being clear about:
+
+- **`.env` keys end up in the bundle.** Vite inlines `VITE_`-prefixed variables
+  at build time, so anyone who loads a site you built with keys present can read
+  them and spend your quota. For a build other people will use, leave `.env`
+  blank and let each person add their own key in Settings.
+- **Your prompts leave the device.** Passages, journal entries and the sentences
+  you write are sent to whichever provider answers. Journal entries in
+  particular can be personal; if that matters, leave the keys blank and stay on
+  the local engine.
+- **Gemini's free tier may train on your input**, per Google's API terms, and
+  requires a restricted or auth key — unrestricted keys are rejected outright.
+
+Free tiers are also small. Groq allows 30 requests a minute and 1,000 a day per
+organisation; Mistral and Google publish theirs only in their own consoles.
+Running out is normal and is exactly what the next candidate is for.
+
+Requests are hand-built with `fetch` rather than through vendor SDKs, for a
+reason that is not stylistic: Mistral's CORS preflight rejects the `x-stainless-*`
+headers the OpenAI-style SDKs attach, Groq's SDK refuses to run in a browser at
+all, and Google's newer Interactions API cannot be reached from a browser
+because its `Api-Revision` header is not on the CORS allowlist — which is why
+Gemini here uses the older `models/…:generateContent` endpoint.
 
 ### Downloads and caching
 
@@ -75,10 +140,16 @@ leaving you at a dead end.
 
 Five of the seven prompts need JSON back. Rather than hoping a small model
 complies, each is defined once as a JSON Schema in
-`src/inference/responseSchemas.ts` and passed to whichever engine is active:
-WebLLM compiles it with XGrammar, wllama hands it to llama.cpp. `generateText`
-looks the schema up from the prompt's `### TASK:` line, so no mode pipeline
-knows constrained generation exists. The tolerant parser in
+`src/inference/responseSchemas.ts` and translated for whichever candidate is
+answering: WebLLM compiles it with XGrammar, wllama hands it to llama.cpp,
+Mistral and Groq take it as strict `json_schema` (which is partly why Groq runs
+gpt-oss — most Groq models only offer loose JSON mode), and Gemini takes it as a
+`responseSchema`. That last one needs its own dialect, so
+`src/inference/backends/hostedRequests.ts` strips `additionalProperties` and
+states `propertyOrdering` explicitly.
+
+`generateText` looks the schema up from the prompt's `### TASK:` line, so no mode
+pipeline knows constrained generation exists. The tolerant parser in
 `src/inference/parse.ts` stays in place as a backstop for the free-text prompts
 and for any engine that ignores the constraint.
 
@@ -102,11 +173,15 @@ download itself.
 WASM tier silently falls back to a single thread and is markedly slower. Use the
 WebGPU tier, or host somewhere that can set headers, if that matters.
 
-### Checking a real tier on your machine
+### Checking a real candidate on your machine
 
-Neither real tier can be covered by the test suite: one needs a GPU, both need
-gigabytes of weights. The tests cover the request mapping, the schemas and the
-mode pipelines against the mock tier, and the rest is a short manual pass:
+No real candidate can be covered by the test suite: the local tiers need a GPU
+or gigabytes of weights, and the hosted ones need live keys and a real browser
+to prove CORS works. The tests cover the request mapping, the failure
+classification, the chain's ordering and the mode pipelines against the mock
+tier, and the rest is a short manual pass.
+
+Local engines:
 
 1. Pick the tier in Settings and press **Prepare model**. Progress should be
    determinate and should keep updating while you navigate to another screen.
@@ -119,6 +194,17 @@ mode pipelines against the mock tier, and the rest is a short manual pass:
    with an offer to load the 3B model instead, not a raw error.
 5. Confirm `crossOriginIsolated` is `true` in the console on your host of
    choice — if it is `false`, the WASM tier is running single-threaded.
+
+Hosted providers, one key at a time so you know which one answered:
+
+6. Add the key, then generate a passage. The network tab should show one request
+   to that provider and **no** model weights being fetched.
+7. Run Reading through to its questions. That is the constrained-JSON path, and
+   it is where a schema the provider dislikes will show up as a 400.
+8. Delete the key and generate again. The provider should be skipped silently,
+   not reported as an error.
+9. With all three keys set, exhaust one free tier (or use a deliberately wrong
+   key) and confirm generation still succeeds from the next provider.
 
 ## Architecture
 
@@ -147,9 +233,20 @@ generateText(prompt: string, options?: InferenceOptions): Promise<string>
 ```
 
 Prompts are plain text in, plain text out; the schema that constrains a reply is
-looked up inside `generateText`, not passed in by the caller. Even so the model
-is never *trusted*: `src/inference/parse.ts` recovers JSON tolerantly, and the
-journal diff is computed locally from the two plain texts rather than asked for.
+looked up inside `generateText`, not passed in by the caller, and so is the
+decision about which of the six backends answers. No mode pipeline knows the
+chain exists, which is what made adding three hosted providers a change to one
+layer.
+
+Even so the model is never *trusted*: `src/inference/parse.ts` recovers JSON
+tolerantly, and the journal diff is computed locally from the two plain texts
+rather than asked for.
+
+`src/inference/chain.ts` owns the ordering and the failure policy but takes its
+backends and its loader as injected dependencies, so the walk can be tested
+without a network, a key or a GPU. That injection is also what keeps the local
+model lazy: `ensureReady()` is called at the moment the walk reaches the local
+candidate, never before.
 
 ### Exposure is not mastery
 
@@ -191,12 +288,18 @@ browser profile only:
 - `srsReviewLog` — one row per evaluated attempt; the source of truth for mastery
 - `journalEntries` — original text, corrected text, computed diff, words touched
 - `comprehensionSessions` — theme, passage, questions, answers, evaluations
-- `settings` — inference tier and preferences
+- `settings` — local engine, hosted provider API keys, and preferences
 
 Nothing is synced or backed up. Clearing site data for this origin deletes it,
-and Settings has an explicit "Delete all local data" action. The vocabulary store
-starts empty; Settings also offers an optional 32-word starter list so training
-has something to schedule on a fresh install.
+and Settings has an explicit "Delete all local data" action, which takes the
+saved API keys with it. The vocabulary store starts empty; Settings also offers
+an optional 32-word starter list so training has something to schedule on a
+fresh install.
+
+The one exception to "everything stays here" is a configured hosted provider:
+your prompts, and therefore the journal entries and sentences inside them, are
+sent to it. Nothing else is — the vocabulary store, review log and diffs are all
+computed and kept locally.
 
 ## License
 

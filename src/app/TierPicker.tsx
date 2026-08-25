@@ -3,9 +3,9 @@ import {
   ensureReady,
   getBackend,
   isModelLoadError,
-  listBackends,
+  listLocalBackends,
   type CapabilityReport,
-  type InferenceTier,
+  type LocalInferenceTier,
 } from '../inference';
 import { Alert, Badge, Button, ProgressBar, Spinner, cn } from '../ui';
 import { formatBytes, hasRoomFor, readQuota, requestPersistence, type QuotaReport } from './storageQuota';
@@ -16,16 +16,25 @@ function formatSize(megabytes: number): string {
 }
 
 export interface TierPickerProps {
-  selected: InferenceTier;
-  onSelect: (tier: InferenceTier) => void;
+  selected: LocalInferenceTier;
+  onSelect: (tier: LocalInferenceTier) => void;
   report: CapabilityReport | null;
   className?: string;
 }
 
+/**
+ * Picks the *local* engine — the last candidate in the chain, used when no
+ * hosted provider can answer. Hosted providers are deliberately absent: they
+ * are not an alternative to this choice, they run before it.
+ */
 export function TierPicker({ selected, onSelect, report, className }: TierPickerProps) {
   return (
-    <div className={cn('grid gap-3', className)} role="radiogroup" aria-label="Inference tier">
-      {listBackends().map((backend) => {
+    <div
+      className={cn('grid gap-3', className)}
+      role="radiogroup"
+      aria-label="Local inference engine"
+    >
+      {listLocalBackends().map((backend) => {
         const availability = report?.[backend.tier];
         const available = availability?.available ?? true;
         const isSelected = selected === backend.tier;
@@ -81,17 +90,20 @@ export function TierPicker({ selected, onSelect, report, className }: TierPicker
 }
 
 export interface ModelPreparationProps {
-  tier: InferenceTier;
+  tier: LocalInferenceTier;
   className?: string;
 }
 
 /**
- * Downloads and loads a tier's model.
+ * Downloads and loads a local tier's model.
  *
  * The load goes through `ensureReady`, so progress shows up here and in the
  * app-wide banner at once and navigating away does not orphan the download.
  * That also means `tier` must be the *active* tier — both callers select a tier
  * by saving it, so it always is.
+ *
+ * Preparing ahead of time is now purely optional: with hosted providers in
+ * front, the local model is only reached when they all decline.
  */
 export function ModelPreparation({ tier, className }: ModelPreparationProps) {
   const backend = getBackend(tier);

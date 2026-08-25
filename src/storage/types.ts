@@ -164,10 +164,17 @@ export interface ComprehensionSession {
 
 export interface AppSettings {
   /**
-   * Id of the active inference tier. Typed as a string on purpose — storage
-   * does not depend on the inference layer's union; the app narrows it.
+   * Id of the local engine used when no hosted provider can answer. Typed as a
+   * string on purpose — storage does not depend on the inference layer's union;
+   * the app narrows it.
    */
   activeTier: string;
+  /**
+   * Keys for the hosted providers, by provider id, as entered by the user. A
+   * blank or absent entry means that provider is skipped. Loosely typed for the
+   * same reason as `activeTier`.
+   */
+  apiKeys: Record<string, string>;
   firstRunCompleted: boolean;
   starterVocabLoaded: boolean;
   language: LanguageCode;
@@ -179,6 +186,7 @@ export const SETTINGS_KEY = 'app';
 
 export const DEFAULT_SETTINGS: AppSettings = {
   activeTier: 'mock',
+  apiKeys: {},
   firstRunCompleted: false,
   starterVocabLoaded: false,
   language: DEFAULT_LANGUAGE,

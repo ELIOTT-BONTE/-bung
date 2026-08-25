@@ -13,7 +13,7 @@ import wllamaWasmUrl from '@wllama/wllama/esm/wasm/wllama.wasm?url';
 import {
   ModelLoadError,
   type BackendStatus,
-  type InferenceBackend,
+  type LocalInferenceBackend,
   type InferenceOptions,
   type LoadOptions,
   type ModelDescriptor,
@@ -87,8 +87,9 @@ function describeLoadFailure(kind: ModelLoadFailure): string {
   }
 }
 
-class WllamaBackend implements InferenceBackend {
+class WllamaBackend implements LocalInferenceBackend {
   readonly tier = 'wasm' as const;
+  readonly hosted = false;
   readonly label = 'WASM (wllama)';
   readonly description =
     'Runs Qwen2.5 1.5B on the CPU through llama.cpp compiled to WebAssembly. Works in every modern browser; slower than WebGPU and a smaller model.';
@@ -202,4 +203,4 @@ class WllamaBackend implements InferenceBackend {
   }
 }
 
-export const wllamaBackend: InferenceBackend = new WllamaBackend();
+export const wllamaBackend: LocalInferenceBackend = new WllamaBackend();

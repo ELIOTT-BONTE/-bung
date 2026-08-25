@@ -11,7 +11,7 @@
 import {
   ModelLoadError,
   type BackendStatus,
-  type InferenceBackend,
+  type LocalInferenceBackend,
   type InferenceOptions,
   type LoadOptions,
   type ModelDescriptor,
@@ -96,8 +96,9 @@ function describeLoadFailure(kind: ModelLoadFailure, modelId: string, requiredVr
   }
 }
 
-class WebLlmBackend implements InferenceBackend {
+class WebLlmBackend implements LocalInferenceBackend {
   readonly tier = 'webgpu' as const;
+  readonly hosted = false;
   readonly label = 'WebGPU (WebLLM)';
   readonly description =
     'Runs a quantised Llama 3.1 8B on your GPU through WebLLM. Best German of the three tiers; needs WebGPU and a lot of GPU memory.';
@@ -226,4 +227,4 @@ class WebLlmBackend implements InferenceBackend {
   }
 }
 
-export const webllmBackend: InferenceBackend = new WebLlmBackend();
+export const webllmBackend: LocalInferenceBackend = new WebLlmBackend();

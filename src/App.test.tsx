@@ -62,6 +62,7 @@ describe('App', () => {
     expect(await screen.findByText(/Nothing is due right now/i)).toBeTruthy();
 
     await user.click(screen.getByRole('link', { name: 'Settings' }));
-    expect(await screen.findByText(/Inference tier/i)).toBeTruthy();
+    expect(await screen.findByText(/Hosted providers/i)).toBeTruthy();
+    expect(screen.getByText(/Local engine/i)).toBeTruthy();
   });
 });

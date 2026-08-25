@@ -15,7 +15,12 @@ import {
   type MockWord,
 } from '../mockData';
 import { PROMPT_INTENT, readPromptIntent, readSection } from '../prompts';
-import type { BackendStatus, InferenceBackend, InferenceOptions, LoadOptions } from '../types';
+import type {
+  BackendStatus,
+  InferenceOptions,
+  LoadOptions,
+  LocalInferenceBackend,
+} from '../types';
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -278,8 +283,9 @@ function generateForPrompt(prompt: string): string {
   }
 }
 
-class MockBackend implements InferenceBackend {
+class MockBackend implements LocalInferenceBackend {
   readonly tier = 'mock' as const;
+  readonly hosted = false;
   readonly label = 'Mock (dev)';
   readonly description =
     'Canned offline German responses. No download, no model — for trying out every mode end to end.';
@@ -325,4 +331,4 @@ class MockBackend implements InferenceBackend {
   }
 }
 
-export const mockBackend: InferenceBackend = new MockBackend();
+export const mockBackend: LocalInferenceBackend = new MockBackend();
