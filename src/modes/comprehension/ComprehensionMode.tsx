@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import { CEFR_LEVELS, type CefrLevel } from '../../inference';
 import {
   Alert,
   Badge,
@@ -14,12 +15,15 @@ import {
 import { InferenceErrorAlert } from '../shared/InferenceErrorAlert';
 import { VocabPill } from '../shared/VocabPill';
 import {
+  PASSAGE_LENGTHS,
   completeSession,
   evaluateAnswers,
   generatePassage,
+  passageLengthById,
   prepareStudyMaterial,
   type CompletionResult,
   type EvaluationOutcome,
+  type PassageLengthId,
   type StudyMaterial,
 } from './pipeline';
 
@@ -37,6 +41,8 @@ type Phase = 'theme' | 'generating' | 'reading' | 'evaluating' | 'result';
 export function ComprehensionMode() {
   const [phase, setPhase] = useState<Phase>('theme');
   const [theme, setTheme] = useState('');
+  const [level, setLevel] = useState<CefrLevel>('A2');
+  const [lengthId, setLengthId] = useState<PassageLengthId>('medium');
   const [passage, setPassage] = useState('');
   const [material, setMaterial] = useState<StudyMaterial | null>(null);
   const [answers, setAnswers] = useState<string[]>([]);
@@ -44,24 +50,51 @@ export function ComprehensionMode() {
   const [completion, setCompletion] = useState<CompletionResult | null>(null);
   const [status, setStatus] = useState('');
   const [error, setError] = useState<unknown>(null);
+  const [materialError, setMaterialError] = useState<unknown>(null);
+  const [materialLoading, setMaterialLoading] = useState(false);
+  const requestId = useRef(0);
 
   const trimmedTheme = theme.trim();
+  const length = passageLengthById(lengthId);
+  const busy = phase === 'generating' || phase === 'evaluating';
 
-  async function start() {
-    setError(null);
-    setPhase('generating');
-
+  async function loadQuestions(text: string, id: number, selectedLevel: CefrLevel) {
+    setMaterialLoading(true);
+    setMaterialError(null);
     try {
-      setStatus('Writing a passage on your theme…');
-      const generated = await generatePassage(trimmedTheme);
-      setPassage(generated);
-
-      setStatus('Pulling out questions and key vocabulary…');
-      const prepared = await prepareStudyMaterial(generated);
+      const prepared = await prepareStudyMaterial(text, { level: selectedLevel });
+      if (id !== requestId.current) return;
       setMaterial(prepared);
       setAnswers(prepared.questions.map(() => ''));
-      setPhase('reading');
     } catch (caught) {
+      if (id !== requestId.current) return;
+      setMaterialError(caught);
+    } finally {
+      if (id === requestId.current) setMaterialLoading(false);
+    }
+  }
+
+  async function start() {
+    const id = ++requestId.current;
+    setError(null);
+    setMaterialError(null);
+    setMaterial(null);
+    setAnswers([]);
+    setPhase('generating');
+    setStatus('Writing a passage on your theme…');
+
+    try {
+      const generated = await generatePassage(trimmedTheme, {
+        level,
+        approximateWords: length.approximateWords,
+      });
+      if (id !== requestId.current) return;
+
+      setPassage(generated);
+      setPhase('reading');
+      void loadQuestions(generated, id, level);
+    } catch (caught) {
+      if (id !== requestId.current) return;
       setError(caught);
       setPhase('theme');
     }
@@ -94,6 +127,7 @@ export function ComprehensionMode() {
   }
 
   function restart() {
+    requestId.current += 1;
     setPhase('theme');
     setPassage('');
     setMaterial(null);
@@ -101,17 +135,19 @@ export function ComprehensionMode() {
     setOutcome(null);
     setCompletion(null);
     setError(null);
+    setMaterialError(null);
+    setMaterialLoading(false);
   }
 
-  const busy = phase === 'generating' || phase === 'evaluating';
   const masteryIds = new Set(outcome?.masteryVocabIds ?? []);
+  const showPassage = phase === 'reading' || phase === 'evaluating' || phase === 'result';
 
   return (
     <div className="flex flex-col gap-8">
       <SectionHeading
         eyebrow="Read"
         title="Text comprehension"
-        description="A passage built around the words you already have, plus a few new ones. Answer in German, in your own words — there are no multiple-choice options."
+        description="A passage at the level you pick, built around the words you already have. Answer in German, in your own words — there are no multiple-choice options."
         actions={
           phase !== 'theme' ? (
             <Button variant="ghost" onClick={restart} disabled={busy}>
@@ -154,6 +190,34 @@ export function ComprehensionMode() {
           />
 
           <div>
+            <p className="text-ink-300 mb-2 text-sm font-medium">Level</p>
+            <div className="flex flex-wrap gap-2">
+              {CEFR_LEVELS.map((option) => (
+                <Chip
+                  key={option}
+                  label={option}
+                  selected={level === option}
+                  onSelect={() => setLevel(option)}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <p className="text-ink-300 mb-2 text-sm font-medium">Length</p>
+            <div className="flex flex-wrap gap-2">
+              {PASSAGE_LENGTHS.map((option) => (
+                <Chip
+                  key={option.id}
+                  label={`${option.label} · ~${option.approximateWords} words`}
+                  selected={lengthId === option.id}
+                  onSelect={() => setLengthId(option.id)}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div>
             <Button variant="primary" size="lg" onClick={start}>
               Generate passage
             </Button>
@@ -161,27 +225,37 @@ export function ComprehensionMode() {
         </Card>
       )}
 
-      {busy && (
+      {phase === 'generating' && (
         <Card className="flex items-center gap-3">
           <Spinner />
           <p className="text-ink-300 text-sm">{status}</p>
         </Card>
       )}
 
-      {(phase === 'reading' || phase === 'evaluating' || phase === 'result') && material && (
+      {showPassage && passage !== '' && (
         <Card className="flex flex-col gap-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h3 className="text-ink-100 font-medium">
               {trimmedTheme === '' ? 'Your passage' : `Passage: ${trimmedTheme}`}
             </h3>
-            <Badge tone="neutral">{material.vocab.length} key words flagged</Badge>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge tone="neutral">{level}</Badge>
+              <Badge tone="neutral">~{length.approximateWords} words</Badge>
+              {material ? (
+                <Badge tone="neutral">{material.vocab.length} key words flagged</Badge>
+              ) : materialLoading ? (
+                <Badge tone="accent">
+                  <Spinner className="size-3" /> preparing questions
+                </Badge>
+              ) : null}
+            </div>
           </div>
 
           <p className="font-reading text-ink-100 text-[1.12rem] leading-[1.85] whitespace-pre-line">
             {passage}
           </p>
 
-          {material.vocab.length > 0 && (
+          {material && material.vocab.length > 0 && (
             <div className="border-ink-800/70 border-t pt-4">
               <p className="text-ink-500 mb-2 text-xs tracking-wide uppercase">
                 Key vocabulary in this passage
@@ -204,7 +278,7 @@ export function ComprehensionMode() {
             </div>
           )}
 
-          {material.rejected.length > 0 && (
+          {material && material.rejected.length > 0 && (
             <Alert tone="warn" title="Some flagged words were not saved">
               <ul className="mt-1 space-y-0.5">
                 {material.rejected.map((item) => (
@@ -215,6 +289,26 @@ export function ComprehensionMode() {
               </ul>
             </Alert>
           )}
+        </Card>
+      )}
+
+      {(phase === 'reading' || phase === 'evaluating') && materialLoading && !material && (
+        <Card className="flex items-center gap-3">
+          <Spinner />
+          <p className="text-ink-300 text-sm">
+            Pulling out questions and key vocabulary — you can start reading in the meantime.
+          </p>
+        </Card>
+      )}
+
+      {(phase === 'reading' || phase === 'evaluating') && materialError !== null && !material && (
+        <Card className="flex flex-col gap-3">
+          <InferenceErrorAlert error={materialError} />
+          <div>
+            <Button variant="secondary" onClick={() => void loadQuestions(passage, ++requestId.current, level)}>
+              Try questions again
+            </Button>
+          </div>
         </Card>
       )}
 
@@ -251,6 +345,13 @@ export function ComprehensionMode() {
               Unanswered questions are marked wrong, nothing else happens.
             </span>
           </div>
+        </Card>
+      )}
+
+      {phase === 'evaluating' && (
+        <Card className="flex items-center gap-3">
+          <Spinner />
+          <p className="text-ink-300 text-sm">{status}</p>
         </Card>
       )}
 

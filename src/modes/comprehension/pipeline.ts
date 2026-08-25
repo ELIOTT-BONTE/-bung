@@ -17,6 +17,7 @@ import {
   buildPassagePrompt,
   buildQuestionsAndVocabPrompt,
   generateText,
+  type CefrLevel,
   parseAnswerEvaluations,
   parsePassage,
   parseQuestionsAndVocab,
@@ -39,7 +40,48 @@ import {
 
 export const QUESTION_COUNT = 3;
 export const VOCAB_FLAG_COUNT = 6;
-export const NEW_WORD_BUDGET = 4;
+
+export const PASSAGE_LENGTHS = [
+  { id: 'short', label: 'Short', approximateWords: 80 },
+  { id: 'medium', label: 'Medium', approximateWords: 140 },
+  { id: 'long', label: 'Long', approximateWords: 220 },
+] as const;
+
+export type PassageLengthId = (typeof PASSAGE_LENGTHS)[number]['id'];
+
+export function passageLengthById(id: PassageLengthId) {
+  return PASSAGE_LENGTHS.find((option) => option.id === id) ?? PASSAGE_LENGTHS[1];
+}
+
+/** How many unseen words a passage may introduce, scaled to how hard it is. */
+export function newWordBudgetFor(level: CefrLevel): number {
+  switch (level) {
+    case 'A1':
+      return 2;
+    case 'A2':
+      return 3;
+    case 'B1':
+      return 4;
+    case 'B2':
+      return 5;
+    case 'C1':
+    case 'C2':
+      return 6;
+  }
+}
+
+/**
+ * Decode budget for a passage. German words are often more than one token, and
+ * a cap that is too tight cuts the text off mid-sentence.
+ */
+function passageMaxTokens(approximateWords: number): number {
+  return Math.min(1024, Math.max(280, Math.round(approximateWords * 2.4 + 80)));
+}
+
+export interface GeneratePassageOptions {
+  level?: CefrLevel;
+  approximateWords?: number;
+}
 
 /**
  * A comprehension answer is indirect evidence: the learner showed they know
@@ -48,10 +90,22 @@ export const NEW_WORD_BUDGET = 4;
  */
 const COMPREHENSION_GRADE: ReviewGrade = 4;
 
-export async function generatePassage(theme: string): Promise<string> {
+export async function generatePassage(
+  theme: string,
+  options: GeneratePassageOptions = {},
+): Promise<string> {
+  const level = options.level ?? 'A2';
+  const approximateWords = options.approximateWords ?? 140;
   const knownTerms = await getKnownTerms();
   const raw = await generateText(
-    buildPassagePrompt({ theme, knownTerms, newWordBudget: NEW_WORD_BUDGET }),
+    buildPassagePrompt({
+      theme,
+      knownTerms,
+      newWordBudget: newWordBudgetFor(level),
+      approximateWords,
+      level,
+    }),
+    { maxTokens: passageMaxTokens(approximateWords) },
   );
   return parsePassage(raw);
 }
@@ -68,12 +122,16 @@ export interface StudyMaterial {
  * Second call: questions and flagged vocabulary in one round trip. Saving the
  * words here is bookkeeping only — no counters move until the session ends.
  */
-export async function prepareStudyMaterial(passage: string): Promise<StudyMaterial> {
+export async function prepareStudyMaterial(
+  passage: string,
+  options: { level?: CefrLevel } = {},
+): Promise<StudyMaterial> {
   const raw = await generateText(
     buildQuestionsAndVocabPrompt({
       passage,
       questionCount: QUESTION_COUNT,
       vocabCount: VOCAB_FLAG_COUNT,
+      level: options.level ?? 'A2',
     }),
   );
 

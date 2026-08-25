@@ -36,10 +36,10 @@ beforeEach(async () => {
 
 describe('text comprehension', () => {
   it('exposes every flagged word but only masters the ones an answer demonstrated', async () => {
-    const passage = await generatePassage('Reisen');
+    const passage = await generatePassage('Reisen', { level: 'B1', approximateWords: 80 });
     expect(passage).toContain('Zug');
 
-    const material = await prepareStudyMaterial(passage);
+    const material = await prepareStudyMaterial(passage, { level: 'B1' });
     expect(material.questions).toHaveLength(3);
     expect(material.vocab.length).toBeGreaterThan(2);
 

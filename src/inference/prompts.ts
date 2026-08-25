@@ -27,6 +27,22 @@ export const GERMAN_TUTOR_SYSTEM_PROMPT =
   'You never invent German that a native speaker would not write. ' +
   'When asked for JSON you reply with JSON only and no commentary.';
 
+export const CEFR_LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'] as const;
+export type CefrLevel = (typeof CEFR_LEVELS)[number];
+
+/**
+ * What each CEFR band actually means for a generated passage. The model is
+ * much more reliable when told the sentence shape, not just the letter.
+ */
+export const CEFR_GUIDANCE: Record<CefrLevel, string> = {
+  A1: 'Very simple sentences, present tense, high-frequency everyday words. Almost no subordinate clauses.',
+  A2: 'Short connected sentences on everyday topics. Perfekt is fine; weil/dass once in a while is fine.',
+  B1: 'Natural connected prose, a mix of tenses, some subordinate clauses. Concrete rather than abstract.',
+  B2: 'Fluent, varied sentences with nuance and opinion. Occasional idioms; still contemporary and concrete.',
+  C1: 'Sophisticated but readable prose, implicit meaning, precise vocabulary, natural connectors.',
+  C2: 'Native-like register and rhythm, subtle tone, no textbook flavour.',
+};
+
 /**
  * Shared instruction block for any call that extracts vocabulary. The
  * determiner and plural of a noun must come out of the same call that
@@ -71,20 +87,27 @@ export interface PassagePromptInput {
   knownTerms: readonly string[];
   newWordBudget: number;
   approximateWords?: number;
+  level?: CefrLevel;
 }
 
 export function buildPassagePrompt(input: PassagePromptInput): string {
-  const { theme, knownTerms, newWordBudget, approximateWords = 120 } = input;
+  const { theme, knownTerms, newWordBudget, approximateWords = 120, level = 'A2' } = input;
+  const paragraphs =
+    approximateWords <= 100 ? 'one or two short paragraphs' : 'two to four short paragraphs';
+
   return build(PROMPT_INTENT.passage, [
-    `Write a short German reading passage of roughly ${approximateWords} words on the theme below.`,
+    `Write a German reading passage of roughly ${approximateWords} words on the theme below.`,
+    `Target level: CEFR ${level}. ${CEFR_GUIDANCE[level]}`,
     'Requirements:',
-    '- Natural, contemporary German at around A2-B1 level.',
+    `- Stay at ${level}. Do not drift easier or harder.`,
     '- Reuse as many of the learner\'s known words as reads naturally.',
     `- Introduce at most ${newWordBudget} words the learner has not seen yet.`,
-    '- Three to five short paragraphs or a single tight one; no title, no translation.',
+    `- Write ${paragraphs}; no title, no translation.`,
     '- Reply with the German passage only. No English, no notes, no markdown.',
     '',
-    section('THEME', theme),
+    section('THEME', theme || 'Alltag'),
+    '',
+    section('LEVEL', level),
     '',
     section(
       'KNOWN WORDS',
@@ -97,13 +120,14 @@ export interface QuestionsAndVocabPromptInput {
   passage: string;
   questionCount: number;
   vocabCount: number;
+  level?: CefrLevel;
 }
 
 export function buildQuestionsAndVocabPrompt(input: QuestionsAndVocabPromptInput): string {
-  const { passage, questionCount, vocabCount } = input;
+  const { passage, questionCount, vocabCount, level = 'A2' } = input;
   return build(PROMPT_INTENT.questionsAndVocab, [
     `Read the German passage below. Produce ${questionCount} open comprehension questions`,
-    `in German (never yes/no, never multiple choice) and up to ${vocabCount} key vocabulary`,
+    `in German at CEFR ${level} (never yes/no, never multiple choice) and up to ${vocabCount} key vocabulary`,
     'items from the passage that are worth saving for study.',
     '',
     NOUN_FIELDS_RULE,
