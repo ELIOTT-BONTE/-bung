@@ -139,6 +139,27 @@ const journalVocabSchema: ResponseSchema = {
   },
 };
 
+/**
+ * One word, not a list. The vocabulary fields are the shared ones, so a looked
+ * up noun is held to exactly the same determiner-and-plural contract as one
+ * extracted from a passage or a journal entry.
+ */
+const wordLookupSchema: ResponseSchema = {
+  name: 'word_lookup',
+  schema: {
+    type: 'object',
+    properties: {
+      ...VOCAB_PROPERTIES,
+      surfaceRole: {
+        type: 'string',
+        description: 'What the tapped form is, e.g. "dative plural of der Regenbogen"',
+      },
+    },
+    required: [...VOCAB_REQUIRED, 'surfaceRole'],
+    additionalProperties: false,
+  },
+};
+
 const sentenceEvaluationSchema: ResponseSchema = {
   name: 'sentence_evaluation',
   schema: {
@@ -166,6 +187,7 @@ export const SCHEMA_BY_INTENT: Partial<Record<PromptIntent, ResponseSchema>> = {
   [PROMPT_INTENT.correction]: correctionSchema,
   [PROMPT_INTENT.journalVocab]: journalVocabSchema,
   [PROMPT_INTENT.sentenceEvaluation]: sentenceEvaluationSchema,
+  [PROMPT_INTENT.wordLookup]: wordLookupSchema,
 };
 
 /** The schema a built prompt should be answered with, if it wants JSON. */

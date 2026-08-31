@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { diffStats, hasChanges } from '../../diff';
-import { listJournalEntries, type JournalEntry } from '../../storage';
+import { formatVocabDisplay, listJournalEntries, type JournalEntry } from '../../storage';
 import {
   Alert,
   Badge,
@@ -17,11 +17,13 @@ import {
 import { useAsync } from '../../app/useAsync';
 import { InferenceErrorAlert } from '../shared/InferenceErrorAlert';
 import { VocabPill } from '../shared/VocabPill';
+import { addLookupToVocab } from '../shared/wordLookup';
 import {
   STAGE_LABELS,
   submitJournalEntry,
   summarizeCorrection,
   type JournalReview,
+  type JournalUsage,
   type ProgressStage,
 } from './pipeline';
 
@@ -81,6 +83,7 @@ export function JournalingMode() {
   const [text, setText] = useState('');
   const [stage, setStage] = useState<ProgressStage | null>(null);
   const [review, setReview] = useState<JournalReview | null>(null);
+  const [addingTerm, setAddingTerm] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
   const history = useAsync(() => listJournalEntries(10), []);
 
@@ -99,6 +102,35 @@ export function JournalingMode() {
       setError(caught);
     } finally {
       setStage(null);
+    }
+  }
+
+  /**
+   * Stores one suggested word, and only that. It is deliberately not graded for
+   * this entry: the entry was already judged against the list as it stood, and
+   * back-dating a grade onto a word the learner had not chosen yet would be the
+   * same silent bookkeeping this flow exists to avoid. It counts from the next
+   * entry on.
+   */
+  async function addWord(item: JournalUsage) {
+    setAddingTerm(item.draft.term);
+    setError(null);
+    try {
+      const entry = await addLookupToVocab(item.draft);
+      setReview((current) =>
+        current
+          ? {
+              ...current,
+              usage: current.usage.map((row) =>
+                row.draft.term === item.draft.term ? { ...row, entry } : row,
+              ),
+            }
+          : current,
+      );
+    } catch (caught) {
+      setError(caught);
+    } finally {
+      setAddingTerm(null);
     }
   }
 
@@ -164,10 +196,16 @@ export function JournalingMode() {
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <StatTile label="Words written" value={stats ? stats.unchangedWords + stats.deletedWords : 0} />
             <StatTile label="Words changed" value={stats?.deletedWords ?? 0} />
-            <StatTile label="Words tracked" value={review.usage.length} tone="accent" />
+            <StatTile
+              label="Mastery events"
+              value={review.masteryResults.length}
+              tone="accent"
+              hint="words already on your list"
+            />
             <StatTile
               label="Used correctly"
               value={review.usage.filter((item) => item.usedCorrectly).length}
+              hint={`of ${review.usage.length} found`}
             />
           </div>
 
@@ -203,9 +241,10 @@ export function JournalingMode() {
             <div>
               <h3 className="text-ink-100 font-medium">Words you produced</h3>
               <p className="text-ink-500 mt-1 text-sm leading-relaxed">
-                Writing a word yourself is production, so each of these logged a mastery event.
-                Words the correction had to fix logged a failed attempt instead — they come back
-                sooner rather than counting as known.
+                Writing a word yourself is production, so the ones already in your vocabulary
+                logged a mastery event — or a failed attempt, if the correction had to fix them,
+                which brings them back sooner. The rest are only suggestions: nothing joins your
+                vocabulary until you add it.
               </p>
             </div>
 
@@ -214,15 +253,39 @@ export function JournalingMode() {
             ) : (
               <div className="flex flex-col gap-3">
                 {review.usage.map((item) => (
-                  <div key={item.entry.id} className="flex flex-wrap items-center gap-2">
-                    <VocabPill entry={item.entry} highlighted={item.usedCorrectly} />
-                    <Badge tone={item.usedCorrectly ? 'success' : 'warn'}>
-                      {item.usedCorrectly ? 'used correctly' : 'corrected'}
-                    </Badge>
-                    <span className="text-ink-600 text-xs">
-                      mastery {item.entry.masteryLevel}/5
-                      {item.note ? ` · ${item.note}` : ''}
-                    </span>
+                  <div key={item.draft.term} className="flex flex-wrap items-center gap-2">
+                    {item.entry ? (
+                      <>
+                        <VocabPill entry={item.entry} highlighted={item.usedCorrectly} />
+                        <Badge tone={item.usedCorrectly ? 'success' : 'warn'}>
+                          {item.usedCorrectly ? 'used correctly' : 'corrected'}
+                        </Badge>
+                        <span className="text-ink-600 text-xs">
+                          mastery {item.entry.masteryLevel}/5
+                          {item.note ? ` · ${item.note}` : ''}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="border-ink-800 text-ink-400 inline-flex items-baseline gap-1.5 rounded-lg border border-dashed px-2.5 py-1 text-sm">
+                          <span className="font-reading">{formatVocabDisplay(item.draft)}</span>
+                          {item.draft.definition && (
+                            <span className="text-ink-600 text-xs">{item.draft.definition}</span>
+                          )}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          onClick={() => addWord(item)}
+                          disabled={addingTerm !== null}
+                        >
+                          {addingTerm === item.draft.term ? 'Adding…' : 'Add to vocabulary'}
+                        </Button>
+                        <span className="text-ink-600 text-xs">
+                          not tracked, so nothing was recorded
+                          {item.note ? ` · ${item.note}` : ''}
+                        </span>
+                      </>
+                    )}
                   </div>
                 ))}
               </div>

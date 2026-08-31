@@ -12,6 +12,12 @@
  *    word the learner used correctly logs a passing mastery event; a word the
  *    correction had to fix logs a failing one, which schedules it sooner
  *    instead of pretending the correction was already internalised.
+ *
+ * 3. Only words already in the learner's vocabulary are graded. Everything else
+ *    the entry turned up is offered, not filed — writing a word is not a request
+ *    to start studying it, and grading a word that is not on the list would mean
+ *    silently putting it there. So an entry can end up recording nothing, which
+ *    is the correct outcome for a learner who has not picked any words yet.
  */
 
 import { computeWordDiff, hasChanges, type DiffSegment } from '../../diff';
@@ -26,14 +32,15 @@ import {
 import {
   attachCorrection,
   createJournalEntry,
+  findVocabByTerm,
   normalizeTerm,
   recordMasteryAttempt,
   toVocabDrafts,
-  upsertVocabDrafts,
   type JournalEntry,
   type MasteryAttemptResult,
   type RejectedVocabItem,
   type ReviewGrade,
+  type VocabDraft,
   type VocabEntry,
 } from '../../storage';
 
@@ -45,10 +52,20 @@ const CORRECT_USAGE_GRADE: ReviewGrade = 4;
 const CORRECTED_USAGE_GRADE: ReviewGrade = 2;
 
 export interface JournalUsage {
-  entry: VocabEntry;
+  /** How the word would be saved, if the learner decides they want it. */
+  draft: VocabDraft;
+  /**
+   * Their existing entry, or null for a word they do not track. A word they do
+   * not track cannot be graded — there is nothing to grade — so it is offered
+   * rather than recorded.
+   */
+  entry: VocabEntry | null;
   usedCorrectly: boolean;
   note: string | null;
 }
+
+/** A usage of a word the learner holds, which is what can carry a grade. */
+type TrackedUsage = JournalUsage & { entry: VocabEntry };
 
 export interface JournalReview {
   entry: JournalEntry;
@@ -115,28 +132,37 @@ export async function submitJournalEntry(
   const noteByTerm = new Map(extracted.map((item) => [normalizeTerm(item.term), item.note]));
 
   const { drafts, rejected } = toVocabDrafts(extracted);
-  const upserted = await upsertVocabDrafts(drafts);
 
-  const usage: JournalUsage[] = upserted.map((result) => {
-    const key = normalizeTerm(result.entry.term);
-    return {
-      entry: result.entry,
-      usedCorrectly: usedCorrectlyByTerm.get(key) ?? true,
-      note: noteByTerm.get(key) ?? null,
-    };
-  });
+  // Nothing is stored here. Using a word is not the same as asking to study it,
+  // and an entry that quietly filed six words would be deciding for the learner
+  // what their vocabulary list contains.
+  const usage: JournalUsage[] = await Promise.all(
+    drafts.map(async (draft) => {
+      const key = normalizeTerm(draft.term);
+      return {
+        draft,
+        entry: (await findVocabByTerm(draft.term)) ?? null,
+        usedCorrectly: usedCorrectlyByTerm.get(key) ?? true,
+        note: noteByTerm.get(key) ?? null,
+      };
+    }),
+  );
+
+  const tracked: TrackedUsage[] = usage.flatMap((item) =>
+    item.entry ? [{ ...item, entry: item.entry }] : [],
+  );
 
   const reviewed = await attachCorrection(entry.id, {
     correctedText,
     correctionSummary: correction.summary === '' ? null : correction.summary,
     correctionEngine: answer.label,
     diff,
-    vocabIds: usage.map((item) => item.entry.id),
+    vocabIds: tracked.map((item) => item.entry.id),
   });
 
   report('recording');
   const masteryResults: MasteryAttemptResult[] = [];
-  for (const item of usage) {
+  for (const item of tracked) {
     masteryResults.push(
       await recordMasteryAttempt({
         vocabId: item.entry.id,
@@ -158,7 +184,9 @@ export async function submitJournalEntry(
     correctedText,
     correctionSummary: reviewed.correctionSummary,
     correctionEngine: answer.label,
-    usage: usage.map((item) => ({ ...item, entry: masteryById.get(item.entry.id) ?? item.entry })),
+    usage: usage.map((item) =>
+      item.entry ? { ...item, entry: masteryById.get(item.entry.id) ?? item.entry } : item,
+    ),
     rejected,
     masteryResults,
   };

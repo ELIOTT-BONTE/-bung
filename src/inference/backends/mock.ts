@@ -266,6 +266,42 @@ function generateForPrompt(prompt: string): string {
       });
     }
 
+    case PROMPT_INTENT.wordLookup: {
+      const surface = /^TAPPED: (.+)$/m.exec(prompt)?.[1]?.trim() ?? '';
+      // Same stem match the sentence evaluation uses, so an inflected form in
+      // the passage still finds its dictionary entry in the bank.
+      const stem = surface.slice(0, Math.max(4, surface.length - 2));
+      const found =
+        stem === ''
+          ? undefined
+          : MOCK_WORD_BANK.find((word) =>
+              new RegExp(`(?<!\\p{L})${escapeRegExp(stem)}`, 'iu').test(word.term),
+            );
+
+      if (found) {
+        return JSON.stringify({
+          term: found.term,
+          partOfSpeech: found.partOfSpeech,
+          determiner: found.determiner ?? '',
+          pluralForm: found.pluralForm ?? '',
+          definition: found.definition,
+          surfaceRole: found.term.toLowerCase() === surface.toLowerCase() ? '' : `form of ${displayForm(found)}`,
+        });
+      }
+
+      // Nothing in the bank. Answered as "other" on purpose: a guessed noun
+      // would arrive without a real plural and be rejected before saving, so
+      // the mock would be offering a word it cannot actually add.
+      return JSON.stringify({
+        term: surface,
+        partOfSpeech: 'other',
+        determiner: '',
+        pluralForm: '',
+        definition: 'Not in the offline mock dictionary — configure a real engine to look this up.',
+        surfaceRole: '',
+      });
+    }
+
     case PROMPT_INTENT.sentenceEvaluation: {
       const term = /^TERM: (.+)$/m.exec(prompt)?.[1]?.trim() ?? '';
       const sentence = readSection(prompt, 'SENTENCE');

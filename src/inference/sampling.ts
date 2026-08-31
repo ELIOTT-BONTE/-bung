@@ -42,6 +42,10 @@ export const SAMPLING_BY_INTENT: Partial<Record<PromptIntent, Sampling>> = {
   [PROMPT_INTENT.journalVocab]: { temperature: 0.2 },
   [PROMPT_INTENT.answerEvaluation]: { temperature: 0.2 },
   [PROMPT_INTENT.sentenceEvaluation]: { temperature: 0.2 },
+
+  // A dictionary form is a fact, and it is one word: a tight budget keeps the
+  // wait short enough that tapping a word feels like a lookup, not a request.
+  [PROMPT_INTENT.wordLookup]: { temperature: 0.1, maxTokens: 320 },
 };
 
 /** The decoding settings a built prompt should be answered with. */

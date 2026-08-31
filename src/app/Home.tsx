@@ -37,8 +37,9 @@ const MODES: readonly ModeCard[] = [
     eyebrow: 'Read',
     title: 'Text comprehension',
     description:
-      'Generate a passage on a theme of your choice, answer open questions about it in German, and get your answers evaluated.',
-    detail: 'Words in the passage count as exposure. Words your answers show you understood count for mastery.',
+      'Generate a passage on a theme of your choice, tap any word you do not know, and answer open questions about it in German.',
+    detail:
+      'Nothing joins your vocabulary until you add it. Words you have count as exposure when they turn up; words your answers show you understood count for mastery.',
   },
   {
     route: '/journal',
@@ -46,7 +47,8 @@ const MODES: readonly ModeCard[] = [
     title: 'Journaling',
     description:
       'Write freely in German. If something needs fixing you get a corrected version with a word-level diff of the changes.',
-    detail: 'Words you used correctly, or used and then internalised the correction for, count for mastery.',
+    detail:
+      'Words already on your list count for mastery when you use them; anything else the entry turns up is offered, not added.',
   },
   {
     route: '/vocab',

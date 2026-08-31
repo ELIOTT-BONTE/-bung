@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { CEFR_LEVELS, type CefrLevel } from '../../inference';
+import { normalizeTerm } from '../../storage';
 import {
   Alert,
   Badge,
@@ -13,14 +14,19 @@ import {
   TextInput,
 } from '../../ui';
 import { InferenceErrorAlert } from '../shared/InferenceErrorAlert';
+import { LookupText } from '../shared/LookupText';
 import { VocabPill } from '../shared/VocabPill';
+import { WordLookupPanel } from '../shared/WordLookupPanel';
+import { useWordLookup } from '../shared/useWordLookup';
 import {
+  CUSTOM_PASSAGE_WORDS,
   PASSAGE_LENGTHS,
   completeSession,
   evaluateAnswers,
   generatePassage,
   passageLengthById,
   prepareStudyMaterial,
+  readCustomLength,
   type CompletionResult,
   type EvaluationOutcome,
   type PassageLengthId,
@@ -38,11 +44,15 @@ const CURATED_THEMES: readonly string[] = [
 
 type Phase = 'theme' | 'generating' | 'reading' | 'evaluating' | 'result';
 
+/** The presets, plus the escape hatch for a length none of them covers. */
+type LengthChoice = PassageLengthId | 'custom';
+
 export function ComprehensionMode() {
   const [phase, setPhase] = useState<Phase>('theme');
   const [theme, setTheme] = useState('');
   const [level, setLevel] = useState<CefrLevel>('A2');
-  const [lengthId, setLengthId] = useState<PassageLengthId>('medium');
+  const [lengthChoice, setLengthChoice] = useState<LengthChoice>('medium');
+  const [customLength, setCustomLength] = useState('');
   const [passage, setPassage] = useState('');
   const [material, setMaterial] = useState<StudyMaterial | null>(null);
   const [answers, setAnswers] = useState<string[]>([]);
@@ -52,10 +62,25 @@ export function ComprehensionMode() {
   const [error, setError] = useState<unknown>(null);
   const [materialError, setMaterialError] = useState<unknown>(null);
   const [materialLoading, setMaterialLoading] = useState(false);
+  // What was actually asked for, so the badge on a finished passage keeps
+  // describing that passage even after the controls move on.
+  const [requestedWords, setRequestedWords] = useState(140);
   const requestId = useRef(0);
+  const lookup = useWordLookup(material?.vocab ?? []);
 
   const trimmedTheme = theme.trim();
-  const length = passageLengthById(lengthId);
+  // Flagged words are suggestions; these are the ones the learner actually has.
+  const ownedEntries = (material?.vocab ?? []).flatMap((word) =>
+    word.entry ? [word.entry] : [],
+  );
+  const addedByTerm = new Map(
+    lookup.added.map((entry) => [normalizeTerm(entry.term), entry]),
+  );
+  const customLengthReading = readCustomLength(customLength);
+  const targetWords =
+    lengthChoice === 'custom'
+      ? customLengthReading.words
+      : passageLengthById(lengthChoice).approximateWords;
   const busy = phase === 'generating' || phase === 'evaluating';
 
   async function loadQuestions(text: string, id: number, selectedLevel: CefrLevel) {
@@ -75,18 +100,22 @@ export function ComprehensionMode() {
   }
 
   async function start() {
+    if (targetWords === null) return;
+
     const id = ++requestId.current;
     setError(null);
     setMaterialError(null);
     setMaterial(null);
     setAnswers([]);
+    lookup.reset();
+    setRequestedWords(targetWords);
     setPhase('generating');
     setStatus('Writing a passage on your theme…');
 
     try {
       const generated = await generatePassage(trimmedTheme, {
         level,
-        approximateWords: length.approximateWords,
+        approximateWords: targetWords,
       });
       if (id !== requestId.current) return;
 
@@ -105,9 +134,25 @@ export function ComprehensionMode() {
     setError(null);
     setPhase('evaluating');
 
+    // The evaluator hears about every key word, but only words the learner
+    // actually holds can be credited — which now means the ones they already
+    // had plus the ones they chose to add while reading.
+    const flaggedTerms = new Set(material.vocab.map((word) => normalizeTerm(word.draft.term)));
+    const tracked = [
+      ...material.vocab.map((word) => ({
+        term: word.draft.term,
+        vocabId:
+          word.entry?.id ?? addedByTerm.get(normalizeTerm(word.draft.term))?.id ?? null,
+      })),
+      // Words they looked up that the passage never flagged.
+      ...lookup.added
+        .filter((entry) => !flaggedTerms.has(normalizeTerm(entry.term)))
+        .map((entry) => ({ term: entry.term, vocabId: entry.id })),
+    ];
+
     try {
       setStatus('Reading your answers…');
-      const evaluated = await evaluateAnswers(passage, material.questions, answers, material.vocab);
+      const evaluated = await evaluateAnswers(passage, material.questions, answers, tracked);
       setOutcome(evaluated);
 
       setStatus('Saving the session…');
@@ -115,7 +160,8 @@ export function ComprehensionMode() {
         theme: trimmedTheme,
         passage,
         answers: evaluated.answers,
-        vocab: material.vocab,
+        knownVocab: ownedEntries,
+        lookedUpVocab: lookup.added,
         masteryVocabIds: evaluated.masteryVocabIds,
       });
       setCompletion(saved);
@@ -128,6 +174,7 @@ export function ComprehensionMode() {
 
   function restart() {
     requestId.current += 1;
+    lookup.reset();
     setPhase('theme');
     setPassage('');
     setMaterial(null);
@@ -210,15 +257,49 @@ export function ComprehensionMode() {
                 <Chip
                   key={option.id}
                   label={`${option.label} · ~${option.approximateWords} words`}
-                  selected={lengthId === option.id}
-                  onSelect={() => setLengthId(option.id)}
+                  selected={lengthChoice === option.id}
+                  onSelect={() => setLengthChoice(option.id)}
                 />
               ))}
+              <Chip
+                label="Custom…"
+                selected={lengthChoice === 'custom'}
+                onSelect={() => setLengthChoice('custom')}
+              />
             </div>
+
+            {lengthChoice === 'custom' && (
+              <TextInput
+                label="Words"
+                type="number"
+                inputMode="numeric"
+                min={CUSTOM_PASSAGE_WORDS.min}
+                max={CUSTOM_PASSAGE_WORDS.max}
+                placeholder={`${CUSTOM_PASSAGE_WORDS.min}–${CUSTOM_PASSAGE_WORDS.max}`}
+                value={customLength}
+                autoFocus
+                wrapperClassName="mt-3 max-w-[15rem]"
+                invalid={customLengthReading.problem !== null}
+                onChange={(event) => setCustomLength(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') void start();
+                }}
+                hint={
+                  customLengthReading.problem ??
+                  `Anything from ${CUSTOM_PASSAGE_WORDS.min} to ${CUSTOM_PASSAGE_WORDS.max}. The model aims for this, it does not count.`
+                }
+              />
+            )}
           </div>
 
           <div>
-            <Button variant="primary" size="lg" onClick={start}>
+            <Button
+              variant="primary"
+              size="lg"
+              onClick={start}
+              disabled={targetWords === null}
+              title={targetWords === null ? 'Type how many words you want first' : undefined}
+            >
               Generate passage
             </Button>
           </div>
@@ -240,7 +321,7 @@ export function ComprehensionMode() {
             </h3>
             <div className="flex flex-wrap items-center gap-2">
               <Badge tone="neutral">{level}</Badge>
-              <Badge tone="neutral">~{length.approximateWords} words</Badge>
+              <Badge tone="neutral">~{requestedWords} words</Badge>
               {material ? (
                 <Badge tone="neutral">{material.vocab.length} key words flagged</Badge>
               ) : materialLoading ? (
@@ -251,9 +332,13 @@ export function ComprehensionMode() {
             </div>
           </div>
 
-          <p className="font-reading text-ink-100 text-[1.12rem] leading-[1.85] whitespace-pre-line">
-            {passage}
-          </p>
+          {/* Held back while answers are being marked: on the local tier a
+              lookup would queue behind that call and slow both down. */}
+          <LookupText
+            text={passage}
+            onLookup={lookup.request}
+            disabled={phase === 'evaluating'}
+          />
 
           {material && material.vocab.length > 0 && (
             <div className="border-ink-800/70 border-t pt-4">
@@ -261,18 +346,41 @@ export function ComprehensionMode() {
                 Key vocabulary in this passage
               </p>
               <div className="flex flex-wrap gap-2">
-                {material.vocab.map((entry) => (
-                  <VocabPill
-                    key={entry.id}
-                    entry={entry}
-                    highlighted={phase === 'result' && masteryIds.has(entry.id)}
-                  />
-                ))}
+                {material.vocab.map((word) => {
+                  const owned = word.entry ?? addedByTerm.get(normalizeTerm(word.draft.term));
+
+                  if (owned) {
+                    return (
+                      <VocabPill
+                        key={word.draft.term}
+                        entry={owned}
+                        highlighted={phase === 'result' && masteryIds.has(owned.id)}
+                      />
+                    );
+                  }
+
+                  // Not in their vocabulary and not going in by itself. Tapping
+                  // opens the same card as tapping the word in the passage.
+                  return (
+                    <button
+                      key={word.draft.term}
+                      type="button"
+                      onClick={() =>
+                        lookup.request({ surface: word.draft.term, sentence: passage })
+                      }
+                      className="border-ink-800 text-ink-400 hover:border-ink-700 hover:text-ink-200 inline-flex items-baseline gap-1.5 rounded-lg border border-dashed px-2.5 py-1 text-sm transition-colors duration-150"
+                    >
+                      <span className="font-reading">{word.draft.term}</span>
+                      <span className="text-ink-600 text-xs">add</span>
+                    </button>
+                  );
+                })}
               </div>
               {phase !== 'result' && (
                 <p className="text-ink-600 mt-2 text-xs">
-                  Reading these counts as exposure only. Mastery moves when your answers show you
-                  understood them.
+                  Dashed words are suggestions — nothing is saved to your vocabulary until you add
+                  it. Words you already have earn exposure for being read here; mastery moves only
+                  when your answers show you understood them.
                 </p>
               )}
             </div>
@@ -290,6 +398,10 @@ export function ComprehensionMode() {
             </Alert>
           )}
         </Card>
+      )}
+
+      {showPassage && passage !== '' && (
+        <WordLookupPanel lookup={lookup} fallbackSentence={passage} />
       )}
 
       {(phase === 'reading' || phase === 'evaluating') && materialLoading && !material && (
@@ -401,10 +513,11 @@ export function ComprehensionMode() {
           <Card className="flex flex-col gap-3">
             <h3 className="text-ink-100 font-medium">What this session changed</h3>
             <p className="text-ink-400 text-sm leading-relaxed">
-              All {completion.exposedCount} flagged words got one exposure each — that number tracks
-              familiarity, not knowledge, and never moves mastery on its own.{' '}
+              {completion.exposedCount === 0
+                ? 'No exposures: none of this passage’s vocabulary is in your list yet. Tap a word and add it to start tracking it.'
+                : `${completion.exposedCount} of your words got one exposure each for turning up here — that number tracks familiarity, not knowledge, and never moves mastery on its own.`}{' '}
               {completion.masteryResults.length === 0
-                ? 'No word earned a mastery event this time: use the key vocabulary in your answers to change that.'
+                ? 'No word earned a mastery event this time: add the words you want to track, then use them in your answers.'
                 : `${completion.masteryResults.length} word${completion.masteryResults.length === 1 ? '' : 's'} earned a logged mastery event and a new review date.`}
             </p>
             {completion.masteryResults.length > 0 && (

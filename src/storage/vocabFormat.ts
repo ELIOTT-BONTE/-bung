@@ -5,11 +5,15 @@
 
 import type { Determiner, PartOfSpeech } from './types';
 
+/**
+ * Loose about absence on purpose: a stored entry spells it `null` and a draft
+ * leaves it off entirely, and both want the same string out of here.
+ */
 export interface DisplayableVocab {
   term: string;
   partOfSpeech: PartOfSpeech;
-  determiner: Determiner | null;
-  pluralForm: string | null;
+  determiner?: Determiner | null;
+  pluralForm?: string | null;
 }
 
 /**

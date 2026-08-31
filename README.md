@@ -1,9 +1,10 @@
 # Übung — German reading & writing trainer
 
 A German practice app that runs entirely in your browser. Read generated
-passages and answer questions about them, keep a journal that gets corrected
-with a word-level diff, and drill the vocabulary you pick up along the way with
-a spaced-repetition scheduler.
+passages and answer questions about them, tap any word you do not know to get
+its dictionary form and file it away, keep a journal that gets corrected with a
+word-level diff, and drill the vocabulary you pick up along the way with a
+spaced-repetition scheduler.
 
 There is no backend and no account. Out of the box there are no API keys and no
 network calls at runtime except downloading the language model itself, and
@@ -213,20 +214,23 @@ src/
   inference/   generateText() and the swappable backends behind it
   storage/     IndexedDB schema and repositories
   srs/         pure SM-2 scheduling, mastery derivation, exercise selection
+  text/        German tokenisation and sentence boundaries
   diff/        word-level diffing over diff-match-patch
   modes/       the three practice screens, each composing the layers above
   app/         shell, routing, settings, first-run flow
   ui/          small presentational primitives
 ```
 
-`inference`, `storage`, `srs` and `diff` contain no React and do not import each
-other, apart from `storage` calling the pure functions in `srs` when it persists
-a review. Mode screens compose them; nothing composes a mode screen.
+`inference`, `storage`, `srs`, `text` and `diff` contain no React and do not
+import each other, apart from `storage` calling the pure functions in `srs` when
+it persists a review and `diff` tokenising through `text`. Mode screens compose
+them; nothing composes a mode screen.
 
 ### One inference entry point
 
 Every model call in the app — passage generation, question writing, vocabulary
-extraction, answer evaluation, correction, sentence grading — goes through:
+extraction, answer evaluation, correction, word lookup, sentence grading — goes
+through:
 
 ```ts
 generateText(prompt: string, options?: InferenceOptions): Promise<string>
@@ -255,14 +259,29 @@ candidate, never before.
 The vocabulary model draws a hard line between meeting a word and knowing it,
 and enforces it in the schema rather than in UI code.
 
-- **Exposure** — a word appearing in a generated passage, or being shown on the
-  front of a flashcard. `recordExposure()` accepts no grade and no outcome, and
-  can only touch `exposureCount`, `lastExposedAt` and `skillContexts`.
-- **Mastery** — an evaluated act of recall or production: a flashcard answered
-  correctly, a free-text comprehension answer that demonstrates the word, a
-  journal entry using it, or a correct "use it in a sentence" attempt. These go
-  through `recordMasteryAttempt()`, whose parameter type only admits active
-  exercise types, so a passive event cannot be expressed.
+- **Exposure** — one of *your* words turning up in a generated passage, or being
+  shown on the front of a flashcard. `recordExposure()` accepts no grade and no
+  outcome, and can only touch `exposureCount`, `lastExposedAt` and
+  `skillContexts`.
+- **Mastery** — an evaluated act of recall or production on a word you track: a
+  flashcard answered correctly, a free-text comprehension answer that
+  demonstrates the word, a journal entry using it, or a correct "use it in a
+  sentence" attempt. These go through `recordMasteryAttempt()`, whose parameter
+  type only admits active exercise types, so a passive event cannot be expressed.
+
+Nothing joins the vocabulary list on the app's initiative. A passage flags the
+words it thinks are worth learning, a lookup explains any word you tap, and a
+journal entry names the words you managed to use — but all three are offers.
+`prepareStudyMaterial`, `resolveLookup` and `submitJournalEntry` write no
+vocabulary at all; a word is stored only when you press Add, and
+`upsertVocabDrafts` is the one path that gets you there.
+
+The list is therefore always yours, and two things follow from that. A word can
+never be exposed before you own it. And a word you have not taken earns nothing
+even when you use it perfectly — in an answer or in a journal entry — because
+there is no entry to credit, and crediting one would mean silently creating it.
+An integration test drives a whole reading session, a corrected journal entry and
+a lookup, then asserts the vocabulary list is still empty.
 
 Mastery is never a mutable counter. Every attempt appends a row to
 `srsReviewLog`, and the level is recomputed from that log by

@@ -17,6 +17,7 @@ export const PROMPT_INTENT = {
   correction: 'journaling.correction',
   journalVocab: 'journaling.vocab_extraction',
   sentenceEvaluation: 'vocab.sentence_evaluation',
+  wordLookup: 'vocab.word_lookup',
 } as const;
 
 export type PromptIntent = (typeof PROMPT_INTENT)[keyof typeof PROMPT_INTENT];
@@ -267,6 +268,48 @@ export function buildSentenceEvaluationPrompt(input: SentenceEvaluationPromptInp
     `TERM: ${term}`,
     `DISPLAY FORM: ${displayForm}`,
     `MEANING: ${definition}`,
+    '',
+    section('SENTENCE', sentence),
+  ]);
+}
+
+export interface WordLookupPromptInput {
+  /** Exactly what the learner tapped or selected, inflected as it appeared. */
+  surface: string;
+  /** The sentence it appeared in, which is what disambiguates it. */
+  sentence: string;
+}
+
+/**
+ * Looks one word or phrase up as a dictionary would.
+ *
+ * The sentence is not decoration. Without it "Bank" could be a bench or a bank,
+ * a separable verb's particle sits somewhere else entirely, and an inflected
+ * form like "Regenbögen" gives no reliable clue to its own singular. The reply
+ * has to arrive as a dictionary form with its determiner and plural, because
+ * `storage/vocabDraft.ts` refuses to save a noun without them.
+ */
+export function buildWordLookupPrompt(input: WordLookupPromptInput): string {
+  const { surface, sentence } = input;
+  return build(PROMPT_INTENT.wordLookup, [
+    'The learner tapped a word or phrase while reading and wants to know what it means.',
+    '',
+    'Give the dictionary form, not the inflected form they tapped: the nominative',
+    'singular of a noun, the infinitive of a verb (with its particle, so "einsteigen"',
+    'not "steigt"), the uninflected form of an adjective. Read the sentence to decide',
+    'which word it actually is — the same surface form can be several words.',
+    '',
+    'Set "surfaceRole" to one short English phrase saying what the tapped form is,',
+    'for example "dative plural of der Regenbogen" or "3rd person singular of gehen".',
+    'Use "" when the tapped form is already the dictionary form.',
+    '',
+    NOUN_FIELDS_RULE,
+    '',
+    'Reply with JSON only, in exactly this shape:',
+    '{"term":"Bahnhof","partOfSpeech":"noun","determiner":"der","pluralForm":"Bahnhöfe",' +
+      '"definition":"train station","surfaceRole":"dative singular of der Bahnhof"}',
+    '',
+    `TAPPED: ${surface}`,
     '',
     section('SENTENCE', sentence),
   ]);

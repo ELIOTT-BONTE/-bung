@@ -6,6 +6,7 @@ import {
   buildPassagePrompt,
   buildQuestionsAndVocabPrompt,
   buildSentenceEvaluationPrompt,
+  buildWordLookupPrompt,
 } from './prompts';
 import { ModelOutputError } from './parse';
 import { SCHEMA_BY_INTENT, schemaForPrompt } from './responseSchemas';
@@ -15,6 +16,7 @@ import {
   parseJournalVocab,
   parseQuestionsAndVocab,
   parseSentenceEvaluation,
+  parseWordLookup,
 } from './schemas';
 import type { JsonSchema } from './types';
 
@@ -36,6 +38,7 @@ describe('schemaForPrompt', () => {
         definition: 'train station',
         sentence: 'Der Bahnhof ist groß.',
       }),
+      buildWordLookupPrompt({ surface: 'Bahnhofs', sentence: 'Vor dem Bahnhofs stand ein Zug.' }),
     ];
 
     for (const prompt of jsonPrompts) {
@@ -202,5 +205,42 @@ describe('schemas agree with the parsers', () => {
       grade: 5,
       feedback: 'Sehr gut.',
     });
+  });
+
+  it('reads a conforming word-lookup reply', () => {
+    const reply = JSON.stringify({
+      term: 'Bahnhof',
+      partOfSpeech: 'noun',
+      determiner: 'der',
+      pluralForm: 'Bahnhöfe',
+      definition: 'train station',
+      surfaceRole: 'genitive singular of der Bahnhof',
+    });
+
+    expect(parseWordLookup(reply)).toMatchObject({
+      term: 'Bahnhof',
+      determiner: 'der',
+      pluralForm: 'Bahnhöfe',
+      surfaceRole: 'genitive singular of der Bahnhof',
+    });
+  });
+
+  it('reads a lookup of a word that is already its own dictionary form', () => {
+    const reply = JSON.stringify({
+      term: 'schön',
+      partOfSpeech: 'adjective',
+      determiner: '',
+      pluralForm: '',
+      definition: 'beautiful',
+      surfaceRole: '',
+    });
+
+    expect(parseWordLookup(reply)).toMatchObject({ surfaceRole: null, determiner: null });
+  });
+
+  it('refuses a lookup reply that named no word', () => {
+    const reply = JSON.stringify({ term: '', partOfSpeech: 'noun', definition: 'nothing' });
+
+    expect(() => parseWordLookup(reply)).toThrow(ModelOutputError);
   });
 });

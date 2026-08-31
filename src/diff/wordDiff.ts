@@ -12,23 +12,15 @@
  */
 
 import DiffMatchPatch from 'diff-match-patch';
+import { countWords, tokenizeWords } from '../text';
 import type { DiffSegment, DiffStats } from './types';
 
 /** Unicode private use area: 6400 slots, plenty for a journal entry. */
 const PRIVATE_USE_START = 0xe000;
 const MAX_DISTINCT_TOKENS = 0xf8ff - PRIVATE_USE_START + 1;
 
-/**
- * Words (including umlauts, apostrophes and hyphens) and numbers become one
- * token each; every whitespace run becomes one token; each remaining character
- * stands alone, so an inserted comma shows up as a comma and not as a rewrite
- * of the word beside it.
- */
-const TOKEN_PATTERN = /\p{L}[\p{L}\p{N}'’\-]*|\p{N}+|\s+|[^\s]/gu;
-
-export function tokenize(text: string): string[] {
-  return text.match(TOKEN_PATTERN) ?? [];
-}
+/** Kept as a named re-export: word lookup needs the same split. */
+export { tokenizeWords as tokenize };
 
 interface Encoded {
   a: string;
@@ -42,7 +34,7 @@ function encode(original: string, corrected: string): Encoded | null {
 
   const encodeOne = (text: string): string | null => {
     let out = '';
-    for (const token of tokenize(text)) {
+    for (const token of tokenizeWords(text)) {
       let index = indexByToken.get(token);
       if (index === undefined) {
         if (tokens.length >= MAX_DISTINCT_TOKENS) return null;
@@ -113,10 +105,6 @@ export function computeWordDiff(original: string, corrected: string): DiffSegmen
   return mergeSegments(
     diffs.map(([op, text]) => ({ op: opFor(op), text: decode(text, encoded.tokens) })),
   );
-}
-
-function countWords(text: string): number {
-  return (text.match(/\p{L}[\p{L}\p{N}'’\-]*|\p{N}+/gu) ?? []).length;
 }
 
 export function diffStats(segments: readonly DiffSegment[]): DiffStats {

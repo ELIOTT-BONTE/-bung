@@ -55,6 +55,11 @@ export interface SentenceEvaluation {
   feedback: string;
 }
 
+export interface WordLookup extends ExtractedVocabItem {
+  /** What the tapped form was, e.g. `dative plural of der Regenbogen`. */
+  surfaceRole: string | null;
+}
+
 function readVocabItem(value: unknown): ExtractedVocabItem | null {
   if (typeof value !== 'object' || value === null) return null;
   const record = value as Record<string, unknown>;
@@ -156,6 +161,19 @@ export function parseJournalVocab(raw: string): ExtractedVocabItem[] {
   return asArray(record.vocab)
     .map(readVocabItem)
     .filter((item): item is ExtractedVocabItem => item !== null);
+}
+
+/**
+ * A single word, read by the same function that reads a list entry, so the
+ * lookup path cannot drift from the extraction path on what a valid noun is.
+ */
+export function parseWordLookup(raw: string): WordLookup {
+  const record = asRecord(parseJsonLoose(raw), raw);
+  const item = readVocabItem(record);
+  if (!item) {
+    throw new ModelOutputError('Lookup reply named no word', raw);
+  }
+  return { ...item, surfaceRole: asNullableString(record.surfaceRole) };
 }
 
 export function parseSentenceEvaluation(raw: string): SentenceEvaluation {

@@ -10,12 +10,20 @@ const CONTROL_BASE =
 interface FieldWrapperProps {
   label?: string;
   hint?: ReactNode;
+  invalid?: boolean;
   htmlFor?: string;
   children: ReactNode;
   className?: string;
 }
 
-function FieldWrapper({ label, hint, htmlFor, children, className }: FieldWrapperProps) {
+function FieldWrapper({
+  label,
+  hint,
+  invalid = false,
+  htmlFor,
+  children,
+  className,
+}: FieldWrapperProps) {
   return (
     <div className={cn('flex flex-col gap-1.5', className)}>
       {label && (
@@ -24,7 +32,11 @@ function FieldWrapper({ label, hint, htmlFor, children, className }: FieldWrappe
         </label>
       )}
       {children}
-      {hint && <p className="text-ink-500 text-xs leading-relaxed">{hint}</p>}
+      {hint && (
+        <p className={cn('text-xs leading-relaxed', invalid ? 'text-clay-300' : 'text-ink-500')}>
+          {hint}
+        </p>
+      )}
     </div>
   );
 }
@@ -32,15 +44,35 @@ function FieldWrapper({ label, hint, htmlFor, children, className }: FieldWrappe
 export interface TextInputProps extends InputHTMLAttributes<HTMLInputElement> {
   label?: string;
   hint?: ReactNode;
+  /** Reads the hint as a rejection rather than guidance, and says so to AT. */
+  invalid?: boolean;
   wrapperClassName?: string;
 }
 
-export function TextInput({ label, hint, wrapperClassName, className, ...props }: TextInputProps) {
+export function TextInput({
+  label,
+  hint,
+  invalid = false,
+  wrapperClassName,
+  className,
+  ...props
+}: TextInputProps) {
   const generatedId = useId();
   const id = props.id ?? generatedId;
   return (
-    <FieldWrapper label={label} hint={hint} htmlFor={id} className={wrapperClassName}>
-      <input id={id} className={cn(CONTROL_BASE, className)} {...props} />
+    <FieldWrapper
+      label={label}
+      hint={hint}
+      invalid={invalid}
+      htmlFor={id}
+      className={wrapperClassName}
+    >
+      <input
+        id={id}
+        aria-invalid={invalid || undefined}
+        className={cn(CONTROL_BASE, invalid && 'border-clay-500/60', className)}
+        {...props}
+      />
     </FieldWrapper>
   );
 }
