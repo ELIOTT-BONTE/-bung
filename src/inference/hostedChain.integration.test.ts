@@ -11,7 +11,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { generateText, getBackend, setActiveTier } from './index';
 import { clearApiKeys, setSettingsKeys } from './keys';
-import { buildPassagePrompt, buildSentenceEvaluationPrompt } from './prompts';
+import { buildCorrectionPrompt, buildPassagePrompt, buildSentenceEvaluationPrompt } from './prompts';
 import { parseSentenceEvaluation } from './schemas';
 import { isHostedProviderError, type HostedProviderError } from './types';
 
@@ -77,7 +77,7 @@ describe('generateText over hosted providers', () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
-  it('sends the tutor system prompt and the app\u2019s sampling defaults', async () => {
+  it('sends the tutor system prompt and the prompt\u2019s own sampling settings', async () => {
     setSettingsKeys({ mistral: 'sk-test' });
     const fetchImpl = router({ 'api.mistral.ai': () => openAiReply('Der Bahnhof ist groß.') });
     vi.stubGlobal('fetch', fetchImpl);
@@ -88,8 +88,27 @@ describe('generateText over hosted providers', () => {
     expect(body.model).toBe('mistral-small-latest');
     expect(body.messages[0].role).toBe('system');
     expect(body.messages[0].content).toContain('German');
-    expect(body.temperature).toBe(0.7);
+    // Writing a passage is the one task where invention is the point.
+    expect(body.temperature).toBe(0.8);
     expect(body.max_tokens).toBe(640);
+  });
+
+  it('asks for the journal correction near-deterministically', async () => {
+    setSettingsKeys({ mistral: 'sk-test' });
+    const fetchImpl = router({
+      'api.mistral.ai': () =>
+        openAiReply('{"corrected":"Das Wetter war schön.","summary":"Fixed the gender."}'),
+    });
+    vi.stubGlobal('fetch', fetchImpl);
+
+    await generateText(buildCorrectionPrompt('Der Wetter war schön.'));
+
+    const body = JSON.parse(String(fetchImpl.mock.calls[0][1]?.body));
+    // A rewrite has one right answer, so sampling variety here only invents new
+    // mistakes and shows them to the learner as fixes.
+    expect(body.temperature).toBe(0.1);
+    expect(body.max_tokens).toBeGreaterThan(640);
+    expect(body.response_format.json_schema.name).toBe('correction');
   });
 
   it('constrains the reply for a prompt that needs JSON, and parses it', async () => {

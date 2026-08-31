@@ -14,7 +14,6 @@ export const PROMPT_INTENT = {
   passage: 'comprehension.passage',
   questionsAndVocab: 'comprehension.questions_and_vocab',
   answerEvaluation: 'comprehension.answer_evaluation',
-  correctionCheck: 'journaling.correction_check',
   correction: 'journaling.correction',
   journalVocab: 'journaling.vocab_extraction',
   sentenceEvaluation: 'vocab.sentence_evaluation',
@@ -173,24 +172,45 @@ export function buildAnswerEvaluationPrompt(input: AnswerEvaluationPromptInput):
   ]);
 }
 
-export function buildCorrectionCheckPrompt(text: string): string {
-  return build(PROMPT_INTENT.correctionCheck, [
-    'Decide whether the learner\'s German journal entry below needs any correction',
-    '(grammar, case, word order, spelling, capitalisation of nouns, idiom).',
-    'Do not rewrite it here.',
-    '',
-    'Reply with JSON only, in exactly this shape:',
-    '{"needsCorrection":true,"summary":"one short English sentence on what is off"}',
-    '',
-    section('ENTRY', text),
-  ]);
-}
-
+/**
+ * The correction is the one call where a lazy answer is indistinguishable from
+ * a correct one: a model that echoes the entry back reads as "nothing to fix".
+ * Naming the error classes and showing a worked rewrite is what stops that, and
+ * an earlier version of this prompt ("keep their voice, change only what is
+ * wrong") actively encouraged the echo — it left English words in place.
+ *
+ * The summary shares this call rather than getting its own, so a verdict on
+ * whether the entry needs correcting can never disagree with the rewrite it is
+ * supposed to be describing.
+ */
 export function buildCorrectionPrompt(text: string): string {
   return build(PROMPT_INTENT.correction, [
-    'Rewrite the learner\'s German journal entry below so it is correct and natural.',
-    'Keep their voice, their content and their sentence order. Change only what is wrong.',
-    'Reply with the corrected German text only — no commentary, no markdown, no quotes.',
+    'Rewrite the learner\'s German journal entry below the way a native speaker would write it.',
+    'Keep their meaning, their content and their order of ideas. Do not add new ideas, do not',
+    'add or remove sentences, and never comment on the writing inside the rewrite itself.',
+    '',
+    'Correct every mistake you find, including all of these:',
+    '- Words left in English or any other language: replace them with the German word.',
+    '- Invented, misspelled or wrong-form words, including a verb form used as a noun.',
+    '- Noun gender: the article must match the noun ("das Wetter", never "der Wetter").',
+    '- Case endings on articles, adjectives and pronouns.',
+    '- Impersonal constructions use "es gibt" and "es gab", never "er gibt" or "er gab".',
+    '- Uncountable nouns take "viel"; countable plurals take "viele".',
+    '- Tense and mood: do not leave a subjunctive ("wäre") where a past tense ("war") belongs.',
+    '- Adjectives that do not collocate: pick the one a native speaker uses ("starker Regen").',
+    '- Verb position, and the missing comma before a subordinate clause or before',
+    '  "also", "aber", "denn", "sondern".',
+    '- Capitalisation: every German noun is capitalised.',
+    '',
+    'Worked example of the standard expected:',
+    'ENTRY: Gestern wäre ich im Park. Der Wetter war gut also habe ich viele Sonne gesehen.',
+    'REWRITE: Gestern war ich im Park. Das Wetter war gut, also habe ich viel Sonne gesehen.',
+    '',
+    'Then write "summary": one short English sentence naming the kinds of mistakes you fixed.',
+    'If and only if the entry is already fully correct, return it unchanged and say so there.',
+    '',
+    'Reply with JSON only, in exactly this shape:',
+    '{"corrected":"the complete corrected German text","summary":"one short English sentence"}',
     '',
     section('ENTRY', text),
   ]);

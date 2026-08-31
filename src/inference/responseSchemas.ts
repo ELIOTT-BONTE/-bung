@@ -14,7 +14,7 @@
  *     need and all a 1.5B model handles well.
  *
  * These constrain shape, not truth: `schemas.ts` still parses defensively, and
- * the free-text prompts (passage, correction) have no schema at all.
+ * the one long-form prose prompt (passage) has no schema at all.
  */
 
 import { PROMPT_INTENT, readPromptIntent, type PromptIntent } from './prompts';
@@ -93,15 +93,24 @@ const answerEvaluationSchema: ResponseSchema = {
   },
 };
 
-const correctionCheckSchema: ResponseSchema = {
-  name: 'correction_check',
+/**
+ * The rewrite is German prose, but it is schema-constrained anyway: pairing it
+ * with the summary in one object is what removes the separate "does this need
+ * correcting?" call, and a grammar is the only thing that stops a model from
+ * answering a rewrite request with an apology.
+ */
+const correctionSchema: ResponseSchema = {
+  name: 'correction',
   schema: {
     type: 'object',
     properties: {
-      needsCorrection: { type: 'boolean' },
+      corrected: {
+        type: 'string',
+        description: 'The complete corrected German text, with no commentary',
+      },
       summary: SHORT_TEXT,
     },
-    required: ['needsCorrection', 'summary'],
+    required: ['corrected', 'summary'],
     additionalProperties: false,
   },
 };
@@ -148,13 +157,13 @@ const sentenceEvaluationSchema: ResponseSchema = {
  * Looked up by `generateText` from the prompt's `### TASK:` line, so no mode
  * pipeline has to know that constrained generation exists.
  *
- * `passage` and `correction` are absent on purpose: they return German prose,
- * and wrapping prose in JSON would only give the model a way to fail.
+ * `passage` is absent on purpose: it is long-form prose with nothing to pair it
+ * with, so wrapping it in JSON would only give the model a way to fail.
  */
 export const SCHEMA_BY_INTENT: Partial<Record<PromptIntent, ResponseSchema>> = {
   [PROMPT_INTENT.questionsAndVocab]: questionsAndVocabSchema,
   [PROMPT_INTENT.answerEvaluation]: answerEvaluationSchema,
-  [PROMPT_INTENT.correctionCheck]: correctionCheckSchema,
+  [PROMPT_INTENT.correction]: correctionSchema,
   [PROMPT_INTENT.journalVocab]: journalVocabSchema,
   [PROMPT_INTENT.sentenceEvaluation]: sentenceEvaluationSchema,
 };

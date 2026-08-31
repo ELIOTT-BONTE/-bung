@@ -129,9 +129,15 @@ export interface JournalEntry {
   createdAt: number;
   updatedAt: number;
   originalText: string;
-  /** Null when the checker found nothing to correct. */
+  /** Null when the rewrite came back identical to what was written. */
   correctedText: string | null;
   correctionSummary: string | null;
+  /**
+   * Label of the engine that produced the correction. Null on a draft, and on
+   * entries written before this was recorded. Kept so a correction that looks
+   * wrong can be traced to the engine that made it rather than guessed at.
+   */
+  correctionEngine: string | null;
   /** Word-level diff, computed client-side from the two plain texts. */
   diff: DiffSegment[];
   /** Vocab entries touched by this entry. */

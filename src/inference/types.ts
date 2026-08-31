@@ -56,11 +56,22 @@ export interface ResponseSchema {
   schema: JsonSchema;
 }
 
+/**
+ * How much a reasoning model may think before answering. Only Groq's gpt-oss
+ * exposes this today; other backends ignore it.
+ */
+export type ReasoningEffort = 'low' | 'medium' | 'high';
+
 export interface InferenceOptions {
   /** Steering instruction prepended to the prompt by the backend. */
   systemPrompt?: string;
   maxTokens?: number;
   temperature?: number;
+  /**
+   * Left low for the JSON calls, where thinking buys nothing and costs latency,
+   * and raised for the ones that are actually a judgement.
+   */
+  reasoningEffort?: ReasoningEffort;
   /** Aborts an in-flight generation. Backends should honour it when possible. */
   signal?: AbortSignal;
   /**

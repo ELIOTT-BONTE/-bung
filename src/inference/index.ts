@@ -21,10 +21,11 @@ import { mistralBackend } from './backends/mistral';
 import { mockBackend } from './backends/mock';
 import { webllmBackend } from './backends/webllm';
 import { wllamaBackend } from './backends/wllama';
-import { runChain, type ChainDeps } from './chain';
+import { runChainDetailed, type ChainDeps, type ChainResult } from './chain';
 import { hasApiKey } from './keys';
 import { GERMAN_TUTOR_SYSTEM_PROMPT } from './prompts';
 import { schemaForPrompt } from './responseSchemas';
+import { samplingForPrompt } from './sampling';
 import {
   HOSTED_TIERS,
   LOCAL_TIERS,
@@ -214,24 +215,32 @@ const chainDeps: ChainDeps = {
   ensureLocalReady: () => ensureReady(),
 };
 
-export async function generateText(prompt: string, options?: InferenceOptions): Promise<string> {
-  // Prompts declare their intent on the first line, so the schema that
-  // constrains the reply can be looked up here rather than passed down through
-  // every mode pipeline.
-  const schema = options?.schema ?? schemaForPrompt(prompt);
-
-  return runChain(
+/**
+ * Runs a prompt and reports which candidate answered it.
+ *
+ * Prompts declare their intent on the first line, so both the schema that
+ * constrains the reply and the decoding settings it wants are looked up here
+ * rather than passed down through every mode pipeline.
+ */
+export async function generateTextDetailed(
+  prompt: string,
+  options?: InferenceOptions,
+): Promise<ChainResult> {
+  return runChainDetailed(
     prompt,
     {
       systemPrompt: GERMAN_TUTOR_SYSTEM_PROMPT,
-      temperature: 0.7,
-      maxTokens: 640,
+      ...samplingForPrompt(prompt),
       ...options,
-      schema,
+      schema: options?.schema ?? schemaForPrompt(prompt),
     },
     activeLocalTier,
     chainDeps,
   );
+}
+
+export async function generateText(prompt: string, options?: InferenceOptions): Promise<string> {
+  return (await generateTextDetailed(prompt, options)).text;
 }
 
 export * from './capabilities';
@@ -239,6 +248,7 @@ export * from './chain';
 export * from './keys';
 export * from './prompts';
 export * from './responseSchemas';
+export * from './sampling';
 export * from './schemas';
 export * from './types';
 export { ModelOutputError } from './parse';

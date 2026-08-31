@@ -14,7 +14,13 @@
  */
 
 import { ModelOutputError } from '../parse';
-import type { HostedProviderId, InferenceOptions, JsonSchema, ResponseSchema } from '../types';
+import type {
+  HostedProviderId,
+  InferenceOptions,
+  JsonSchema,
+  ReasoningEffort,
+  ResponseSchema,
+} from '../types';
 
 /** One provider-neutral HTTP call, ready to hand to `fetch`. */
 export interface HostedRequest {
@@ -30,9 +36,14 @@ export const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta
 /**
  * Reasoning models spend tokens before they emit any answer, and that spend
  * counts against the completion limit. Without this allowance a 640-token
- * budget can be exhausted by reasoning alone and come back empty.
+ * budget can be exhausted by reasoning alone and come back empty, so it scales
+ * with the effort actually requested.
  */
-const REASONING_TOKEN_ALLOWANCE = 512;
+const REASONING_TOKEN_ALLOWANCE: Record<ReasoningEffort, number> = {
+  low: 512,
+  medium: 1536,
+  high: 3072,
+};
 
 type JsonRecord = Record<string, unknown>;
 
@@ -142,19 +153,23 @@ export function buildGroqRequest(
   prompt: string,
   options?: InferenceOptions,
 ): HostedRequest {
+  // gpt-oss is a reasoning model. Hiding the reasoning keeps `content` to the
+  // answer alone, so the existing tolerant parsers see what they expect. The
+  // effort is per-task: low keeps a free-tier extraction call from taking half
+  // a minute, but the journal correction needs room to actually think, or it
+  // hands back the entry it was asked to fix.
+  const effort = options?.reasoningEffort ?? 'low';
+
   const body: JsonRecord = {
     model,
     messages: chatMessages(prompt, options?.systemPrompt),
-    // gpt-oss is a reasoning model. Hiding the reasoning keeps `content` to the
-    // answer alone, so the existing tolerant parsers see what they expect, and
-    // the low effort setting keeps a free-tier call from taking half a minute.
     reasoning_format: 'hidden',
-    reasoning_effort: 'low',
+    reasoning_effort: effort,
   };
 
   if (options?.temperature !== undefined) body.temperature = options.temperature;
   if (options?.maxTokens !== undefined) {
-    body.max_completion_tokens = options.maxTokens + REASONING_TOKEN_ALLOWANCE;
+    body.max_completion_tokens = options.maxTokens + REASONING_TOKEN_ALLOWANCE[effort];
   }
   if (options?.schema) body.response_format = strictResponseFormat(options.schema);
 

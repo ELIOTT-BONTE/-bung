@@ -20,6 +20,7 @@ export async function createJournalEntry(input: CreateJournalEntryInput): Promis
     originalText: input.originalText,
     correctedText: null,
     correctionSummary: null,
+    correctionEngine: null,
     diff: [],
     vocabIds: [],
     status: 'draft',
@@ -31,9 +32,10 @@ export async function createJournalEntry(input: CreateJournalEntryInput): Promis
 }
 
 export interface CorrectionUpdate {
-  /** Null when the checker decided nothing needed changing. */
+  /** Null when the rewrite came back identical to what was written. */
   correctedText: string | null;
   correctionSummary: string | null;
+  correctionEngine: string;
   diff: DiffSegment[];
   vocabIds: string[];
 }

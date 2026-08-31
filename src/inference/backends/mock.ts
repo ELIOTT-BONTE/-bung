@@ -140,6 +140,19 @@ function wordCount(text: string): number {
   return text.split(/\s+/).filter((token) => token.length > 0).length;
 }
 
+/**
+ * Said out loud in every correction the mock tier produces.
+ *
+ * `mockCorrect` is a handful of regexes, and its output is indistinguishable
+ * from a real model's — an entry needing seven fixes comes back with a full
+ * stop appended and nothing else, which reads as "your German was fine". A
+ * fixture must never be mistaken for a correction, so it says what it is.
+ */
+export const MOCK_CORRECTION_DISCLAIMER =
+  'Checked by the offline mock engine, which only fixes noun capitalisation, a few set ' +
+  'phrases, commas before weil/dass/obwohl and a missing full stop. It cannot judge ' +
+  'grammar — configure a hosted provider or a local model for a real correction.';
+
 /** Stand-in corrector: applies a handful of common learner fixes. */
 export function mockCorrect(text: string): string {
   let corrected = text.replace(/[ \t]{2,}/g, ' ').trim();
@@ -221,20 +234,17 @@ function generateForPrompt(prompt: string): string {
       return JSON.stringify({ results }, null, 2);
     }
 
-    case PROMPT_INTENT.correctionCheck: {
+    case PROMPT_INTENT.correction: {
       const entry = readSection(prompt, 'ENTRY');
       const corrected = mockCorrect(entry);
-      const needsCorrection = corrected !== entry.trim();
       return JSON.stringify({
-        needsCorrection,
-        summary: needsCorrection
-          ? 'Capitalisation, auxiliary verb choice or a missing comma needs attention.'
-          : 'Nothing to fix — this reads naturally.',
+        corrected,
+        summary:
+          corrected === entry.trim()
+            ? `${MOCK_CORRECTION_DISCLAIMER} It found nothing to change.`
+            : MOCK_CORRECTION_DISCLAIMER,
       });
     }
-
-    case PROMPT_INTENT.correction:
-      return mockCorrect(readSection(prompt, 'ENTRY'));
 
     case PROMPT_INTENT.journalVocab: {
       const original = readSection(prompt, 'ORIGINAL');

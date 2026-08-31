@@ -12,6 +12,7 @@ import {
   asRecord,
   asString,
   cleanText,
+  ModelOutputError,
   parseJsonLoose,
 } from './parse';
 
@@ -40,8 +41,10 @@ export interface AnswerEvaluation {
   demonstratedTerms: string[];
 }
 
-export interface CorrectionCheck {
-  needsCorrection: boolean;
+export interface CorrectionResult {
+  /** The rewrite. Compared against the original by the caller, never trusted. */
+  correctedText: string;
+  /** One short English sentence, or `''` when the engine gave none. */
   summary: string;
 }
 
@@ -119,16 +122,33 @@ export function parseAnswerEvaluations(raw: string, questionCount: number): Answ
   });
 }
 
-export function parseCorrectionCheck(raw: string): CorrectionCheck {
-  const record = asRecord(parseJsonLoose(raw), raw);
-  return {
-    needsCorrection: asBoolean(record.needsCorrection),
-    summary: asString(record.summary),
-  };
-}
+/**
+ * Deliberately the most tolerant parser here, because this is the one reply
+ * that is still fully usable without its wrapper: an engine that ignores the
+ * schema and answers in plain German has produced a perfectly good correction.
+ *
+ * An envelope with no rewrite in it, though, is a failure and throws. Returning
+ * an empty string instead would surface as "nothing to correct", which is the
+ * silent-skip this call was merged to eliminate.
+ */
+export function parseCorrection(raw: string): CorrectionResult {
+  let record: Record<string, unknown>;
+  try {
+    record = asRecord(parseJsonLoose(raw), raw);
+  } catch {
+    const prose = cleanText(raw);
+    if (prose === '') {
+      throw new ModelOutputError('Correction reply was empty', raw);
+    }
+    return { correctedText: prose, summary: '' };
+  }
 
-export function parseCorrection(raw: string): string {
-  return cleanText(raw);
+  const correctedText = cleanText(asString(record.corrected));
+  if (correctedText === '') {
+    throw new ModelOutputError('Correction reply contained no corrected text', raw);
+  }
+
+  return { correctedText, summary: asString(record.summary) };
 }
 
 export function parseJournalVocab(raw: string): ExtractedVocabItem[] {

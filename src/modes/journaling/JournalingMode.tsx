@@ -41,7 +41,14 @@ function formatDate(timestamp: number): string {
 
 function HistoryItem({ entry }: { entry: JournalEntry }) {
   const [open, setOpen] = useState(false);
-  const corrected = entry.correctedText !== null;
+  // A draft never reached an engine, so neither "corrected" nor "clean" is true
+  // of it. Calling it clean would claim the German was checked and passed.
+  const badge =
+    entry.status === 'draft'
+      ? { tone: 'warn' as const, text: 'not checked' }
+      : entry.correctedText !== null
+        ? { tone: 'warn' as const, text: 'corrected' }
+        : { tone: 'success' as const, text: 'clean' };
 
   return (
     <div className="border-ink-800/70 border-t py-4 first:border-t-0">
@@ -55,9 +62,10 @@ function HistoryItem({ entry }: { entry: JournalEntry }) {
           <p className="text-ink-600 mt-1 text-xs">
             {formatDate(entry.createdAt)} · {entry.vocabIds.length} word
             {entry.vocabIds.length === 1 ? '' : 's'} tracked
+            {entry.correctionEngine ? ` · checked by ${entry.correctionEngine}` : ''}
           </p>
         </div>
-        <Badge tone={corrected ? 'warn' : 'success'}>{corrected ? 'corrected' : 'clean'}</Badge>
+        <Badge tone={badge.tone}>{badge.text}</Badge>
       </button>
 
       {open && entry.diff.length > 0 && (
@@ -174,6 +182,7 @@ export function JournalingMode() {
             </div>
 
             <p className="text-ink-400 text-sm leading-relaxed">{summarizeCorrection(review)}</p>
+            <p className="text-ink-600 text-xs">Checked by {review.correctionEngine}</p>
 
             <DiffText segments={review.diff} />
             {changed && <DiffLegend />}

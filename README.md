@@ -232,11 +232,13 @@ extraction, answer evaluation, correction, sentence grading — goes through:
 generateText(prompt: string, options?: InferenceOptions): Promise<string>
 ```
 
-Prompts are plain text in, plain text out; the schema that constrains a reply is
-looked up inside `generateText`, not passed in by the caller, and so is the
-decision about which of the six backends answers. No mode pipeline knows the
-chain exists, which is what made adding three hosted providers a change to one
-layer.
+Prompts are plain text in, plain text out. Three things are looked up inside
+`generateText` from the prompt's own intent rather than passed in by the caller:
+the schema that constrains the reply (`responseSchemas.ts`), the decoding
+settings it wants (`sampling.ts` — a passage is generated at temperature 0.8, a
+journal correction at 0.1), and which of the six backends answers. No mode
+pipeline knows the chain exists, which is what made adding three hosted
+providers a change to one layer.
 
 Even so the model is never *trusted*: `src/inference/parse.ts` recovers JSON
 tolerantly, and the journal diff is computed locally from the two plain texts

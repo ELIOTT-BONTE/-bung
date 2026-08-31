@@ -1,17 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildAnswerEvaluationPrompt,
-  buildCorrectionCheckPrompt,
   buildCorrectionPrompt,
   buildJournalVocabPrompt,
   buildPassagePrompt,
   buildQuestionsAndVocabPrompt,
   buildSentenceEvaluationPrompt,
 } from './prompts';
+import { ModelOutputError } from './parse';
 import { SCHEMA_BY_INTENT, schemaForPrompt } from './responseSchemas';
 import {
   parseAnswerEvaluations,
-  parseCorrectionCheck,
+  parseCorrection,
   parseJournalVocab,
   parseQuestionsAndVocab,
   parseSentenceEvaluation,
@@ -28,7 +28,7 @@ describe('schemaForPrompt', () => {
         answers: ['Weil.'],
         trackedTerms: ['Bahnhof'],
       }),
-      buildCorrectionCheckPrompt('Ich gehe zum Bahnhof.'),
+      buildCorrectionPrompt('Ich gehe zum Bahnhof.'),
       buildJournalVocabPrompt({ originalText: 'Ich gehe.', correctedText: null, maxItems: 4 }),
       buildSentenceEvaluationPrompt({
         term: 'Bahnhof',
@@ -43,12 +43,10 @@ describe('schemaForPrompt', () => {
     }
   });
 
-  it('leaves the free-prose prompts unconstrained', () => {
+  it('leaves the long-form prose prompt unconstrained', () => {
     const passage = buildPassagePrompt({ theme: 'Reisen', knownTerms: [], newWordBudget: 5 });
-    const correction = buildCorrectionPrompt('Ich gehe zum Bahnhof.');
 
     expect(schemaForPrompt(passage)).toBeUndefined();
-    expect(schemaForPrompt(correction)).toBeUndefined();
   });
 
   it('returns nothing for text that is not one of our prompts', () => {
@@ -149,10 +147,31 @@ describe('schemas agree with the parsers', () => {
     expect(parsed[0]).toMatchObject({ correct: true, demonstratedTerms: ['Bahnhof'] });
   });
 
-  it('reads a conforming correction-check reply', () => {
-    const reply = JSON.stringify({ needsCorrection: false, summary: '' });
+  it('reads a conforming correction reply', () => {
+    const reply = JSON.stringify({
+      corrected: 'Das Wetter war schön.',
+      summary: 'Fixed the noun gender.',
+    });
 
-    expect(parseCorrectionCheck(reply)).toEqual({ needsCorrection: false, summary: '' });
+    expect(parseCorrection(reply)).toEqual({
+      correctedText: 'Das Wetter war schön.',
+      summary: 'Fixed the noun gender.',
+    });
+  });
+
+  it('reads a correction that ignored the schema and answered in plain German', () => {
+    expect(parseCorrection('Das Wetter war schön.')).toEqual({
+      correctedText: 'Das Wetter war schön.',
+      summary: '',
+    });
+  });
+
+  it('refuses a correction envelope with no rewrite in it', () => {
+    const reply = JSON.stringify({ corrected: '', summary: 'Looks fine.' });
+
+    // Reading this as "nothing to correct" is exactly the silent skip that made
+    // a broken reply look like praise.
+    expect(() => parseCorrection(reply)).toThrow(ModelOutputError);
   });
 
   it('reads a conforming journal-vocab reply', () => {

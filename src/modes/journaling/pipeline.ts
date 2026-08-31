@@ -16,12 +16,11 @@
 
 import { computeWordDiff, hasChanges, type DiffSegment } from '../../diff';
 import {
-  buildCorrectionCheckPrompt,
   buildCorrectionPrompt,
   buildJournalVocabPrompt,
   generateText,
+  generateTextDetailed,
   parseCorrection,
-  parseCorrectionCheck,
   parseJournalVocab,
 } from '../../inference';
 import {
@@ -56,22 +55,18 @@ export interface JournalReview {
   diff: DiffSegment[];
   correctedText: string | null;
   correctionSummary: string | null;
+  /** Label of the engine that answered, so a bad correction is attributable. */
+  correctionEngine: string;
   usage: JournalUsage[];
   rejected: RejectedVocabItem[];
   masteryResults: MasteryAttemptResult[];
 }
 
-export type ProgressStage =
-  | 'saving'
-  | 'checking'
-  | 'correcting'
-  | 'extracting'
-  | 'recording';
+export type ProgressStage = 'saving' | 'correcting' | 'extracting' | 'recording';
 
 export const STAGE_LABELS: Record<ProgressStage, string> = {
   saving: 'Saving your entry…',
-  checking: 'Checking whether anything needs correcting…',
-  correcting: 'Writing a corrected version…',
+  correcting: 'Checking your German…',
   extracting: 'Picking out the words you used…',
   recording: 'Logging what you produced…',
 };
@@ -90,17 +85,16 @@ export async function submitJournalEntry(
   report('saving');
   const entry = await createJournalEntry({ originalText: text });
 
-  report('checking');
-  const check = parseCorrectionCheck(await generateText(buildCorrectionCheckPrompt(text)));
+  // One call, not two. A separate "does this need correcting?" round trip could
+  // veto the rewrite before it was ever requested, and its verdict defaulted to
+  // "no" whenever the reply was malformed — a parse slip read as perfect German.
+  report('correcting');
+  const answer = await generateTextDetailed(buildCorrectionPrompt(text));
+  const correction = parseCorrection(answer.text);
 
-  let correctedText: string | null = null;
-  if (check.needsCorrection) {
-    report('correcting');
-    const corrected = parseCorrection(await generateText(buildCorrectionPrompt(text)));
-    // Trust the diff, not the flag: if the "correction" came back identical,
-    // there was nothing to correct after all.
-    if (corrected !== '' && corrected !== text) correctedText = corrected;
-  }
+  // Trust the diff, not the summary: if the rewrite came back identical, there
+  // was nothing to correct whatever the model said about it.
+  const correctedText = correction.correctedText === text ? null : correction.correctedText;
 
   const diff = computeWordDiff(text, correctedText ?? text);
 
@@ -134,7 +128,8 @@ export async function submitJournalEntry(
 
   const reviewed = await attachCorrection(entry.id, {
     correctedText,
-    correctionSummary: check.needsCorrection ? check.summary : null,
+    correctionSummary: correction.summary === '' ? null : correction.summary,
+    correctionEngine: answer.label,
     diff,
     vocabIds: usage.map((item) => item.entry.id),
   });
@@ -162,13 +157,21 @@ export async function submitJournalEntry(
     diff,
     correctedText,
     correctionSummary: reviewed.correctionSummary,
+    correctionEngine: answer.label,
     usage: usage.map((item) => ({ ...item, entry: masteryById.get(item.entry.id) ?? item.entry })),
     rejected,
     masteryResults,
   };
 }
 
+/**
+ * The engine's own words win, including when it changed nothing. "This reads
+ * naturally" is a claim about the learner's German, and an engine that cannot
+ * judge grammar — or one that just declined to — must not get to make it.
+ */
 export function summarizeCorrection(review: JournalReview): string {
-  if (!hasChanges(review.diff)) return 'No corrections needed — this reads naturally.';
-  return review.correctionSummary ?? 'A few things were adjusted.';
+  if (review.correctionSummary !== null) return review.correctionSummary;
+  return hasChanges(review.diff)
+    ? 'A few things were adjusted.'
+    : 'No corrections needed — this reads naturally.';
 }

@@ -73,20 +73,29 @@ function reasonFor(error: unknown): string {
   return String(error);
 }
 
+export interface ChainResult {
+  text: string;
+  /** Which candidate actually answered. */
+  tier: InferenceTier;
+  label: string;
+  /** The candidates that declined first, in the order they were tried. */
+  attempts: readonly ChainAttempt[];
+}
+
 /**
- * Walks the candidates and returns the first answer.
+ * Walks the candidates and returns the first answer along with its source.
  *
  * A candidate is abandoned for any failure other than the caller's own abort:
  * a rejected key, a rate limit, an unreachable host, an unloadable model, or a
  * reply the parsers could not use. An abort is the user's decision and is
  * rethrown untouched rather than burning the rest of the chain.
  */
-export async function runChain(
+export async function runChainDetailed(
   prompt: string,
   options: InferenceOptions,
   localTier: LocalInferenceTier,
   deps: ChainDeps,
-): Promise<string> {
+): Promise<ChainResult> {
   const attempts: ChainAttempt[] = [];
 
   for (const tier of chainOrder(localTier)) {
@@ -100,7 +109,8 @@ export async function runChain(
 
     try {
       if (!hosted) await deps.ensureLocalReady(localTier);
-      return await backend.generate(prompt, options);
+      const text = await backend.generate(prompt, options);
+      return { text, tier, label: backend.label, attempts };
     } catch (error) {
       if (isAbortError(error)) throw error;
       attempts.push({
@@ -113,4 +123,14 @@ export async function runChain(
   }
 
   throw new AllCandidatesFailedError(attempts);
+}
+
+/** The common case, for callers that do not care which candidate answered. */
+export async function runChain(
+  prompt: string,
+  options: InferenceOptions,
+  localTier: LocalInferenceTier,
+  deps: ChainDeps,
+): Promise<string> {
+  return (await runChainDetailed(prompt, options, localTier, deps)).text;
 }
